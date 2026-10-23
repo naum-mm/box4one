@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1, viewport-fit=cover"
+    >
+
+    <meta
+        name="color-scheme"
+        content="light dark"
+    >
+
+    <meta
+        name="theme-color"
+        content="#09090b"
+    >
+
+    <meta
+        name="apple-mobile-web-app-capable"
+        content="yes"
+    >
+
+    <meta
+        name="apple-mobile-web-app-status-bar-style"
+        content="black-translucent"
+    >
+
+    <meta
+        name="apple-mobile-web-app-title"
+        content="BOX4ONE"
+    >
+
+    <meta
+        name="mobile-web-app-capable"
+        content="yes"
+    >
+
+    <meta
+        name="application-name"
+        content="BOX4ONE"
+    >
+
+    <title>BOX4ONE</title>
+
+
+    <link
+        rel="manifest"
+        href="/manifest.webmanifest"
+    >
+
+    <link
+        rel="apple-touch-icon"
+        sizes="180x180"
+        href="/apple-touch-icon.png"
+    >
+
+    <link
+        rel="icon"
+        type="image/png"
+        sizes="192x192"
+        href="/icon-192.png"
+    >
+
+    <link
+        rel="icon"
+        type="image/png"
+        sizes="512x512"
+        href="/icon-512.png"
+    >
+
+    <link
+        rel="stylesheet"
+        href="/style.css?v=mobile-format-20261008"
+    >
+</head>
+
+<body>
+
+
+    <!-- ================================================= -->
+    <!-- HOME -->
+    <!-- ================================================= -->
+
+    <main
+        id="homeView"
+        class="home-view"
+    >
+        <form
+            id="homeForm"
+            class="input-shell"
+            autocomplete="off"
+        >
+            <input
+                id="mainInput"
+                class="main-input"
+                type="text"
+                autocomplete="off"
+                autocapitalize="off"
+                spellcheck="false"
+                aria-label="Input"
+            >
+        </form>
+
+
+        <div
+            id="formatPanel"
+            class="format-panel"
+        >
+            <button
+                type="button"
+                class="format-button"
+                data-media="video"
+                data-quality="1080"
+            >
+                Video 1080
+            </button>
+
+            <button
+                type="button"
+                class="format-button"
+                data-media="video"
+                data-quality="720"
+            >
+                Video 720
+            </button>
+
+            <button
+                type="button"
+                class="format-button"
+                data-media="video"
+                data-quality="480"
+            >
+                Video 480
+            </button>
+
+            <button
+                type="button"
+                class="format-button"
+                data-media="audio"
+                data-quality="320"
+            >
+                Audio 320
+            </button>
+
+            <button
+                type="button"
+                class="format-button"
+                data-media="audio"
+                data-quality="128"
+            >
+                Audio 128
+            </button>
+        </div>
+    <nav class="home-navigation">
+            <a id="homeQueueLink" class="ghost-button hidden" href="/queue">Queue</a>
+        </nav>
+    </main>
+
+
+    <!-- ================================================= -->
+    <!-- JOB -->
+    <!-- ================================================= -->
+
+    <main
+        id="jobView"
+        class="job-view hidden"
+    >
+        <section class="content-card">
+
+            <header class="page-header">
+
+                <div class="job-code-row">
+
+                    <span
+                        id="jobCode"
+                        class="job-code"
+                    >
+                        ----------
+                    </span>
+                    <button id="shareJobButton" class="ghost-button" type="button">Share</button>
+
+
+                </div>
+
+
+                <a
+                    id="jobNavigationLink"
+                    href="/"
+                    class="home-button"
+                    aria-label="Home"
+                    title="Home"
+                >
+                    <svg
+                        viewBox="0 0 24 24"
+                        aria-hidden="true"
+                    >
+                        <path
+                            d="M3 10.8 12 3l9 7.8v9.7a.5.5 0 0 1-.5.5H15v-6H9v6H3.5a.5.5 0 0 1-.5-.5z"
+                        />
+                    </svg>
+                </a>
+
+            </header>
+            <section id="inlinePlayback" class="inline-playback hidden" aria-label="Media player">
+                <div class="inline-playback-heading">
+                    <strong id="inlinePlaybackName"></strong>
+                    <div class="file-actions">
+                        <button id="fullscreenPlayback" class="home-button" type="button" aria-label="Fullscreen" title="Fullscreen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg></button>
+                        <button id="closePlayback" class="home-button" type="button" aria-label="Close player" title="Close player"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+                    </div>
+                </div>
+                <div id="inlineMediaContainer"></div>
+                <p id="inlinePlaybackStatus" role="status"></p>
+            </section>
+
+
+
+            <section class="status-panel">
+
+                <div class="status-row">
+
+                    <div>
+                        <span
+                            id="statusBadge"
+                            class="status-badge"
+                        >
+                            Loading
+                        </span>
+
+                        <h1 id="statusTitle">
+                            Loading
+                        </h1>
+
+                        <p id="statusText"></p>
+                    </div>
+
+
+                    <div
+                        id="progressNumbers"
+                        class="progress-numbers hidden"
+                    ></div>
+
+                </div>
+
+
+                <div
+                    id="progressBarWrap"
+                    class="progress-wrap hidden"
+                >
+                    <div
+                        id="progressBar"
+                        class="progress-bar"
+                    ></div>
+                </div>
+
+            </section>
+
+
+            <div
+                id="expirationBox"
+                class="expiration-box hidden"
+            >
+                <span>
+                    Expires in
+                </span>
+
+                <strong
+                    id="expirationText"
+                >
+                    —
+                </strong>
+            </div>
+
+
+            <section
+                id="filesSection"
+                class="files-section hidden"
+            >
+
+                <div class="section-heading">
+
+                    <div class="files-heading-left">
+
+                        <span>
+                            Files
+                        </span>
+
+                        <span
+                            id="filesCount"
+                            class="files-count"
+                        >
+                            0
+                        </span>
+
+                    </div>
+
+
+                    <a
+                        id="downloadAllButton"
+                        class="download-all-button hidden"
+                        href="#"
+                    >
+                        Download all
+                    </a>
+
+                </div>
+
+
+                <div
+                    id="filesList"
+                ></div>
+
+            </section>
+
+
+            <div
+                id="jobErrorBox"
+                class="job-error hidden"
+            >
+                <strong>
+                    Failed
+                </strong>
+
+                <p
+                    id="jobErrorText"
+                ></p>
+            </div>
+
+        </section>
+    </main>
+
+
+    <!-- ================================================= -->
+    <!-- QUEUE -->
+    <!-- ================================================= -->
+
+    <main
+        id="queueView"
+        class="job-view hidden"
+    >
+        <section class="content-card">
+
+            <header class="page-header queue-header">
+                <div class="queue-header-left">
+                <a
+                    href="/"
+                    class="home-button"
+                    aria-label="Home"
+                    title="Home"
+                >
+                    <svg
+                        viewBox="0 0 24 24"
+                        aria-hidden="true"
+                    >
+                        <path
+                            d="M3 10.8 12 3l9 7.8v9.7a.5.5 0 0 1-.5.5H15v-6H9v6H3.5a.5.5 0 0 1-.5-.5z"
+                        />
+                    </svg>
+                </a>
+                    <span class="queue-title">Queue</span>
+                </div>
+                <div class="queue-header-right">
+                    <button class="ghost-button logout-button hidden" type="button" aria-label="Sign out" title="Sign out"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+                </div>
+            </header>
+
+
+            <section
+                class="queue-summary"
+            >
+
+                <div class="summary-item">
+                    <span>
+                        Active
+                    </span>
+
+                    <strong
+                        id="queueActive"
+                    >
+                        0
+                    </strong>
+                </div>
+
+
+                <div class="summary-item">
+                    <span>
+                        Waiting
+                    </span>
+
+                    <strong
+                        id="queueWaiting"
+                    >
+                        0
+                    </strong>
+                </div>
+
+
+                <div class="summary-item">
+                    <span>
+                        Total
+                    </span>
+
+                    <strong
+                        id="queueTotal"
+                    >
+                        0
+                    </strong>
+                </div>
+
+            </section>
+
+
+            <section
+                id="queueList"
+                class="queue-list"
+            ></section>
+
+
+            <nav
+                id="queuePagination"
+                class="queue-pagination hidden"
+            >
+
+                <button
+                    id="queuePrevious"
+                    class="ghost-button"
+                    type="button"
+                >
+                    Newer
+                </button>
+
+
+                <span
+                    id="queuePageText"
+                    class="queue-page-text"
+                >
+                    Page 1 / 1
+                </span>
+
+
+                <button
+                    id="queueNext"
+                    class="ghost-button"
+                    type="button"
+                >
+                    Older
+                </button>
+
+            </nav>
+
+        </section>
+    </main>
+
+
+    <aside id="downloadNotice" class="download-notice hidden" role="status" aria-live="polite">
+        <div class="download-notice-row"><span id="downloadNoticeText">Передача файла в iOS…</span><button id="dismissDownloadNotice" class="ghost-button" type="button" aria-label="Скрыть уведомление">×</button></div>
+        <div class="transfer-indicator" aria-hidden="true"></div>
+        <small id="downloadNoticeHelp">Дождитесь системного окна. В нём можно сохранить файл. Сайт не получает подтверждение сохранения.</small>
+    </aside>
+    <script src="/config.js?v=play-config-20261008"></script>
+    <script src="/app.js?v=mobile-format-20261008"></script>
+
+</body>
+</html>
