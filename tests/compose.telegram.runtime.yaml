@@ -41,6 +41,7 @@ services:
     cpus: 0.5
   telegram-bot:
     build: ../telegram_bot
+    tmpfs: ["/tmp:size=16m,mode=1777"]
     # Import only: no live bot token, no Telegram requests.
     command: [python, -c, 'import bot; print("bot import OK")']
     networks: [test]
