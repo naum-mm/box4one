@@ -51,6 +51,8 @@ services:
     depends_on:
       mariadb:
         condition: service_healthy
+      download-proxy:
+        condition: service_started
 
     environment:
       DB_HOST: mariadb
@@ -71,6 +73,7 @@ services:
       TELEGRAM_PUBLIC_URL: https://${DOMAIN}
       TELEGRAM_MAX_ACTIVE_JOBS: ${TELEGRAM_MAX_ACTIVE_JOBS:-2}
       TELEGRAM_LINK_TTL_SECONDS: ${TELEGRAM_LINK_TTL_SECONDS:-600}
+      URL_VALIDATION_PROXY: http://download-proxy:8080
       JOBS_ROOT: /data/ytdlp/jobs
 
     volumes:

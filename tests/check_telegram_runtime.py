@@ -42,6 +42,19 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(response.status, 200)
             self.assertIn(b'BOX4ONE', response.read(16384))
 
+    def test_draft_validation_works_in_private_backend_network(self):
+        headers = {'X-Telegram-Token': 'telegram-test-token-with-at-least-32-characters',
+                   'X-Telegram-User': '10000000001'}
+        status, draft = request('POST', '/api/integrations/telegram/drafts', {
+            'source_url': 'https://raw.githubusercontent.com/naum-mm/box4one/main/README.md',
+            'source_message_id': time.time_ns()}, headers)
+        self.assertEqual(status, 200)
+        self.assertEqual(len(draft['draft_id']), 32)
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            request('POST', '/api/integrations/telegram/drafts', {
+                'source_url': 'http://127.0.0.1/', 'source_message_id': time.time_ns()}, headers)
+        self.assertEqual(ctx.exception.code, 422)
+
     def test_existing_worker_processes_and_fails_unsafe_web_job(self):
         _, created = request('POST', '/api/jobs', {
             'source_url': 'http://backend/', 'media_type': 'video', 'quality': '480'},

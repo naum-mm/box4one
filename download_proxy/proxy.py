@@ -34,13 +34,28 @@ async def handle(reader, writer):
                 raise ValueError()
         else:
             parts = urlsplit(target)
-            port = parts.port or 80
-            if method not in {'GET', 'HEAD'} or parts.scheme != 'http' or port != 80:
+            expected_port = 443 if parts.scheme == 'https' else 80
+            port = parts.port or expected_port
+            if method == 'CHECK':
+                if parts.scheme not in {'http', 'https'} or port != expected_port:
+                    raise ValueError()
+            elif method not in {'GET', 'HEAD'} or parts.scheme != 'http' or port != 80:
                 raise ValueError()
         if not parts.hostname or parts.username or parts.password:
             raise ValueError()
         # Bound DNS wait; connect to numeric validated address, never resolve again.
-        addresses = await asyncio.wait_for(asyncio.to_thread(public_addresses, parts.hostname, port), 10)
+        try:
+            addresses = await asyncio.wait_for(asyncio.to_thread(public_addresses, parts.hostname, port), 10)
+        except (OSError, asyncio.TimeoutError) as exc:
+            if method == 'CHECK':
+                permanent = isinstance(exc, socket.gaierror) and exc.errno in {socket.EAI_NONAME, getattr(socket, 'EAI_NODATA', socket.EAI_NONAME)}
+                status = b'422 Unprocessable Content' if permanent else b'503 Service Unavailable'
+                writer.write(b'HTTP/1.1 ' + status + b'\r\nContent-Length: 0\r\nConnection: close\r\n\r\n')
+                return
+            raise
+        if method == 'CHECK':
+            writer.write(b'HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n')
+            return
         upstream, remote = await asyncio.wait_for(asyncio.open_connection(addresses[0][4][0], port), 15)
         if method == 'CONNECT':
             writer.write(b'HTTP/1.1 200 Connection Established\r\n\r\n')

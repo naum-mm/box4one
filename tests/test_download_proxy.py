@@ -1,4 +1,5 @@
 import asyncio
+import socket
 import unittest
 from unittest.mock import patch
 from download_proxy.proxy import public_addresses, handle
@@ -47,3 +48,17 @@ class ProxyNetworkTests(unittest.IsolatedAsyncioTestCase):
         for target in (b'127.0.0.1:443', b'example.com:3306', b'[::1]:443'):
             response = await self.request(b'CONNECT ' + target + b' HTTP/1.1\r\n\r\n')
             self.assertIn(b'403 Forbidden', response)
+
+
+    async def test_check_resolves_without_opening_target_connection(self):
+        response = await self.request(b'CHECK https://93.184.216.34 HTTP/1.1\r\n\r\n')
+        self.assertIn(b'204 No Content', response)
+        response = await self.request(b'CHECK https://127.0.0.1 HTTP/1.1\r\n\r\n')
+        self.assertIn(b'403 Forbidden', response)
+
+    async def test_check_dns_failure_is_service_unavailable(self):
+        for error, expected in ((OSError('DNS unavailable'), b'503 Service Unavailable'),
+                                (socket.gaierror(socket.EAI_NONAME, 'Unknown domain'), b'422 Unprocessable Content')):
+            with self.subTest(error=type(error).__name__), patch('download_proxy.proxy.public_addresses', side_effect=error):
+                response = await self.request(b'CHECK https://example.com HTTP/1.1\r\n\r\n')
+            self.assertIn(expected, response)
