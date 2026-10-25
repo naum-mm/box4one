@@ -168,6 +168,44 @@ class TelegramAPITests(unittest.TestCase):
             self.assertEqual(detail.json()['job_code'], code)
             self.assertNotIn('telegram_id', detail.json())
 
+    def test_history_stops_at_ten_without_losing_older_pending_jobs(self):
+        codes = []
+        with SessionLocal.begin() as db:
+            for index in range(30):
+                job = Job(job_code=f'{index:010d}', source_url='https://example.com/playlist',
+                          media_type='video', quality='480', status='queued' if index == 0 else 'failed')
+                db.add(job); db.flush()
+                db.add(TelegramRequest(id=f'{index:032x}', telegram_id=UID,
+                    source_message_id=index + 1, source_url=job.source_url, job_id=job.id,
+                    terminal_notified=index != 0))
+                codes.append(job.job_code)
+        queue = self.client.get('/api/queue?page=99', headers={'X-Queue-Access': 'queue-test-only'}).json()
+        self.assertEqual((queue['page'], queue['pages'], queue['total'], queue['page_size']), (2, 2, 30, 25))
+        self.assertEqual([j['job_code'] for j in queue['jobs']], codes[:5][::-1])
+        self.assertEqual(queue['queued'], 1)
+        first_page = self.client.get('/api/queue', headers={'X-Queue-Access': 'queue-test-only'}).json()
+        self.assertEqual([j['job_code'] for j in first_page['jobs']], codes[-25:][::-1])
+        history = self.call('GET', '/jobs?limit=100').json()
+        self.assertEqual([j['job_code'] for j in history['jobs']], codes[-10:][::-1])
+        self.assertIsNone(history['next'])
+        with patch.dict(os.environ, {'TELEGRAM_HISTORY_LIMIT': '20'}):
+            self.assertEqual(len(self.call('GET', '/jobs').json()['jobs']), 20)
+        pending = self.call('GET', '/jobs?pending=true&limit=100').json()
+        self.assertEqual([j['job_code'] for j in pending['jobs']], [codes[0]])
+        self.assertEqual(self.client.get(f'/api/jobs/{codes[0]}').status_code, 200)
+
+    def test_failure_reason_is_classified_without_raw_upstream_details(self):
+        code = self.create()
+        for error, reason in [('Задание остановлено: превышен предел размера задания, включая временные файлы.', 'job_size_limit'),
+                              ('Playlist limit exceeded: maximum 50 video items', 'playlist_limit'),
+                              ('Upstream private diagnostic https://example.com/secret', None)]:
+            with SessionLocal.begin() as db:
+                job = db.scalar(select(Job).where(Job.job_code == code))
+                job.status = 'failed'; job.error_message = error
+            response = self.call('GET', f'/jobs/{code}')
+            self.assertEqual(response.json()['failure_reason'], reason)
+            self.assertNotIn(error, response.text)
+
     def test_telegram_files_and_zip_work_through_web_interface(self):
         import io
         import zipfile

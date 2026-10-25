@@ -1,135 +1,93 @@
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: ${LOG_MAX_SIZE:-5m}
+    max-file: '${LOG_MAX_FILES:-2}'
 services:
   mariadb:
     image: mariadb:11.8
     container_name: ytdlp-mariadb
     restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
+    logging: *logging
     environment:
       MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
       MARIADB_DATABASE: ${MARIADB_DATABASE}
       MARIADB_USER: ${MARIADB_USER}
       MARIADB_PASSWORD: ${MARIADB_PASSWORD}
-
-    volumes:
-      - ./mariadb/data:/var/lib/mysql
-
+    volumes: [./mariadb/data:/var/lib/mysql]
+    command: ['--innodb-buffer-pool-size=${DB_BUFFER_POOL_SIZE:-32M}', --performance-schema=OFF, '--max-connections=${DB_MAX_CONNECTIONS:-30}']
+    mem_limit: ${DB_MEMORY:-128m}
+    memswap_limit: ${DB_SWAP:-256m}
     healthcheck:
-      test:
-        [
-          "CMD",
-          "healthcheck.sh",
-          "--connect",
-          "--innodb_initialized"
-        ]
-
+      test: [CMD, healthcheck.sh, --connect, --innodb_initialized]
       interval: 5s
       timeout: 3s
-      retries: 20
-      start_period: 20s
-
-    networks:
-      - ytdlp-network
-
-
+      retries: 30
+    networks: [internal]
   backend:
-    build:
-      context: ./backend
-
+    image: box4one-backend:latest
+    build: ./backend
     container_name: ytdlp-backend
     restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
+    logging: *logging
     depends_on:
-      mariadb:
-        condition: service_healthy
-      download-proxy:
-        condition: service_started
-
+      mariadb: {condition: service_healthy}
+      download-proxy: {condition: service_started}
     environment:
       DB_HOST: mariadb
       DB_PORT: 3306
-
       MARIADB_DATABASE: ${MARIADB_DATABASE}
       MARIADB_USER: ${MARIADB_USER}
       MARIADB_PASSWORD: ${MARIADB_PASSWORD}
-
       WORKER_API_TOKEN: ${WORKER_API_TOKEN}
-      JOB_TTL_MINUTES: ${JOB_TTL_MINUTES}
-
       DOWNLOAD_ACCESS_WORD: ${DOWNLOAD_ACCESS_WORD}
       QUEUE_ACCESS_WORD: ${QUEUE_ACCESS_WORD}
-
+      JOB_TTL_MINUTES: ${JOB_TTL_MINUTES}
+      ARCHIVE_MAX_CONCURRENT: ${ARCHIVE_MAX_CONCURRENT:-1}
       TELEGRAM_INTERNAL_TOKEN: ${TELEGRAM_INTERNAL_TOKEN:-}
       TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS:-}
-      TELEGRAM_PUBLIC_URL: https://${DOMAIN}
+      TELEGRAM_PUBLIC_URL: ${TELEGRAM_PUBLIC_URL:-https://${DOMAIN}}
       TELEGRAM_MAX_ACTIVE_JOBS: ${TELEGRAM_MAX_ACTIVE_JOBS:-2}
+      TELEGRAM_HISTORY_LIMIT: ${TELEGRAM_HISTORY_LIMIT:-10}
       TELEGRAM_LINK_TTL_SECONDS: ${TELEGRAM_LINK_TTL_SECONDS:-600}
+      TELEGRAM_DRAFT_TTL_MINUTES: ${TELEGRAM_DRAFT_TTL_MINUTES:-60}
+      TELEGRAM_MAX_DRAFTS_PER_HOUR: ${TELEGRAM_MAX_DRAFTS_PER_HOUR:-60}
       URL_VALIDATION_PROXY: http://download-proxy:8080
       JOBS_ROOT: /data/ytdlp/jobs
-
-    volumes:
-      - ./jobs:/data/ytdlp/jobs:ro
-
+    volumes: [./jobs:/data/ytdlp/jobs:ro]
+    mem_limit: ${BACKEND_MEMORY:-128m}
+    memswap_limit: ${BACKEND_SWAP:-256m}
+    cpus: ${SERVICE_CPU_LIMIT:-0.5}
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
-      interval: 10s
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=5)"]
+      interval: 5s
       timeout: 6s
-      retries: 12
-    networks:
-      - ytdlp-network
-
-
+      retries: 30
+    networks: [internal]
   nginx:
     image: nginx:alpine
     container_name: ytdlp-nginx
     restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-    depends_on:
-      - backend
-
-    ports:
-      - "80:80"
-      - "443:443"
-
+    logging: *logging
+    depends_on: [backend]
+    ports: ['80:80', '443:443']
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - ./frontend:/usr/share/nginx/html:ro
       - ./jobs:/data/ytdlp/jobs:ro
       - /etc/letsencrypt:/etc/letsencrypt:ro
       - ./certbot/www:/var/www/certbot:ro
-
-    networks:
-      - ytdlp-network
-      - egress
-
-
+    networks: [internal, egress]
   worker:
+    image: box4one-worker:latest
     build: ./worker
     container_name: ytdlp-worker
     restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
     init: true
+    logging: *logging
     environment:
       API_URL: http://backend:8000
-      NO_PROXY: ""
+      NO_PROXY: ''
       WORKER_API_TOKEN: ${WORKER_API_TOKEN}
       JOBS_DIR: /data/ytdlp/jobs
       POLL_INTERVAL: ${POLL_INTERVAL}
@@ -139,81 +97,83 @@ services:
       MAX_JOB_GB: ${MAX_JOB_GB}
       DISK_CHECK_SECONDS: ${DISK_CHECK_SECONDS}
       RETRY_MAX_SECONDS: ${RETRY_MAX_SECONDS}
-    volumes:
-      - ./jobs:/data/ytdlp/jobs
+    volumes: [./jobs:/data/ytdlp/jobs]
+    mem_limit: ${WORKER_MEMORY:-384m}
+    memswap_limit: ${WORKER_SWAP:-768m}
+    cpus: ${SERVICE_CPU_LIMIT:-0.5}
     depends_on:
-      backend:
-        condition: service_healthy
-      download-proxy:
-        condition: service_started
-    networks:
-      - ytdlp-network
-
+      backend: {condition: service_healthy}
+      download-proxy: {condition: service_started}
+    networks: [internal]
   cleanup:
     image: python:3.13-slim
     container_name: ytdlp-cleanup
     restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
     init: true
+    logging: *logging
     environment:
       API_URL: http://backend:8000
       WORKER_API_TOKEN: ${WORKER_API_TOKEN}
       JOBS_DIR: /data/ytdlp/jobs
+      CLEANUP_INTERVAL_SECONDS: ${CLEANUP_INTERVAL_SECONDS:-60}
     volumes:
       - ./cleanup/cleanup.py:/app/cleanup.py:ro
       - ./jobs:/data/ytdlp/jobs
-    command: ["sh", "-c", "while true; do python /app/cleanup.py; sleep 300; done"]
+    command: [sh, -c, 'while true; do python /app/cleanup.py; sleep "$$CLEANUP_INTERVAL_SECONDS"; done']
+    networks: [internal]
     depends_on:
-      backend:
-        condition: service_healthy
-    networks:
-      - ytdlp-network
-
+      backend: {condition: service_healthy}
   download-proxy:
+    image: box4one-download-proxy:latest
     build: ./download_proxy
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    mem_limit: 128m
+    mem_limit: ${PROXY_MEMORY:-64m}
+    memswap_limit: ${PROXY_SWAP:-128m}
     pids_limit: 64
-    networks: [ytdlp-network, egress]
-    logging:
-      driver: json-file
-      options: {max-size: "10m", max-file: "3"}
-
+    networks: [internal, egress]
+    logging: *logging
   telegram-bot:
     profiles: [telegram]
+    image: box4one-telegram-bot:latest
     build: ./telegram_bot
     restart: unless-stopped
     init: true
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    mem_limit: 256m
+    mem_limit: ${TELEGRAM_MEMORY:-192m}
+    memswap_limit: ${TELEGRAM_SWAP:-384m}
+    cpus: ${SERVICE_CPU_LIMIT:-0.5}
     pids_limit: 64
     tmpfs: ["/tmp:size=16m,mode=1777"]
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_INTERNAL_TOKEN: ${TELEGRAM_INTERNAL_TOKEN:-}
       TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS:-}
-      TELEGRAM_API_URL: http://backend:8000
+      TELEGRAM_API_URL: ${TELEGRAM_API_URL:-http://backend:8000}
       TELEGRAM_POLL_SECONDS: ${TELEGRAM_POLL_SECONDS:-10}
       TELEGRAM_UPLOAD_LIMIT_BYTES: ${TELEGRAM_UPLOAD_LIMIT_BYTES:-49000000}
+      TELEGRAM_LINK_TTL_SECONDS: ${TELEGRAM_LINK_TTL_SECONDS:-600}
+      TELEGRAM_MAX_ACTIVE_JOBS: ${TELEGRAM_MAX_ACTIVE_JOBS:-2}
+      TELEGRAM_CHAT_INTERVAL_SECONDS: ${TELEGRAM_CHAT_INTERVAL_SECONDS:-1.1}
+      TELEGRAM_SEND_INTERVAL_SECONDS: ${TELEGRAM_SEND_INTERVAL_SECONDS:-0.06}
+      JOB_TTL_MINUTES: ${JOB_TTL_MINUTES}
+      TELEGRAM_HISTORY_LIMIT: ${TELEGRAM_HISTORY_LIMIT:-10}
+      MAX_JOB_GB: ${MAX_JOB_GB}
+      VIDEO_PLAYLIST_LIMIT: ${VIDEO_PLAYLIST_LIMIT}
+      AUDIO_PLAYLIST_LIMIT: ${AUDIO_PLAYLIST_LIMIT}
     depends_on:
       backend: {condition: service_healthy}
-    networks: [ytdlp-network, egress]
-    logging:
-      driver: json-file
-      options: {max-size: "10m", max-file: "3"}
-
+    networks: [internal, egress]
+    logging: *logging
 networks:
-  ytdlp-network:
+  internal:
+    name: ${INTERNAL_NETWORK_NAME:-${COMPOSE_PROJECT_NAME:-ytdlp-web}_internal}
     driver: bridge
     internal: true
   egress:
-    driver: bridge
+    name: ${EGRESS_NETWORK_NAME:-${COMPOSE_PROJECT_NAME:-ytdlp-web}_egress}
+    external: ${EGRESS_NETWORK_EXTERNAL:-false}

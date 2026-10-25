@@ -11,17 +11,37 @@ from pathlib import PurePath
 import httpx
 from aiogram import Bot, Dispatcher, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramNetworkError, TelegramRetryAfter
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, LinkPreviewOptions
+from aiogram.types import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, LinkPreviewOptions
 
 STATUSES = {'queued': 'В очереди', 'downloading': 'Загрузка', 'processing': 'Обработка',
             'completed': 'Готово', 'failed': 'Ошибка обработки. Попробуйте другую ссылку.',
             'expired': 'Срок хранения истёк'}
 FORMATS = [('Видео 1080p', 'v1080'), ('Видео 720p', 'v720'), ('Видео 480p', 'v480'),
            ('MP3 320', 'a320'), ('MP3 128', 'a128')]
-HELP = ('Отправьте одну HTTP/HTTPS-ссылку на видео или плейлист и выберите формат.\n'
-        '/status — последнее задание\n/myjobs — последние задания\n/help — справка\n'
-        'Готовые файлы доступны до окончания срока хранения.')
 TERMINAL = {'completed', 'failed', 'expired'}
+
+
+def help_text(upload_limit):
+    history = max(1, min(100, int(os.getenv('TELEGRAM_HISTORY_LIMIT', '10'))))
+    size = float(os.getenv('MAX_JOB_GB', '2'))
+    ttl = int(os.getenv('JOB_TTL_MINUTES', '30'))
+    link_minutes = int(os.getenv('TELEGRAM_LINK_TTL_SECONDS', '600')) / 60
+    video = int(os.getenv('VIDEO_PLAYLIST_LIMIT', '50'))
+    audio = int(os.getenv('AUDIO_PLAYLIST_LIMIT', '100'))
+    active = int(os.getenv('TELEGRAM_MAX_ACTIVE_JOBS', '2'))
+    return (
+        'Отправьте одну HTTP/HTTPS-ссылку на видео или плейлист и выберите формат.\n\n'
+        f'Лимит задания: {size:g} ГиБ, включая временные файлы обработки.\n'
+        f'Плейлист: до {video} видео или {audio} аудиофайлов.\n'
+        f'Активных заданий на пользователя: до {active}. Остальные отправляйте после завершения.\n'
+        f'Файлы хранятся {ttl} мин после завершения задания.\n'
+        f'Ссылка действует до {link_minutes:g} мин, но не дольше срока хранения.\n'
+        f'Напрямую в Telegram: до {upload_limit / 1000000:g} МБ на файл; '
+        'более крупные файлы и ZIP доступны по ссылке.\n\n'
+        'Очередь обработки общая с сайтом.\n'
+        '/status — последнее ваше задание\n'
+        f'/myjobs — последние {history} ваших заданий\n'
+        '/help — эта справка')
 
 
 class APIError(Exception):
@@ -73,7 +93,11 @@ class BackendFile(InputFile):
 
 
 def text(job):
-    return f"Задание {job['job_code']}: {STATUSES.get(job['status'], 'Обработка')}\nФайлов: {job['completed_items']}/{job['total_items']}"
+    status = STATUSES.get(job['status'], 'Обработка')
+    if job['status'] == 'failed':
+        status = {'job_size_limit': 'Превышен лимит размера задания, включая временные файлы. Уменьшите качество или размер плейлиста. Лимиты: /help.',
+                  'playlist_limit': 'Превышен лимит элементов плейлиста. Лимиты: /help.'}.get(job.get('failure_reason'), status)
+    return f"Задание {job['job_code']}: {status}\nФайлов: {job['completed_items']}/{job['total_items']}"
 
 
 def keyboard(job):
@@ -89,6 +113,9 @@ class App:
         self.send_lock = asyncio.Lock()
         self.last_chat = {}
         self.limit = min(max(int(os.getenv('TELEGRAM_UPLOAD_LIMIT_BYTES', '49000000')), 1), 49000000)
+        self.help = help_text(self.limit)
+        self.chat_interval = max(1.1, float(os.getenv('TELEGRAM_CHAT_INTERVAL_SECONDS', '1.1')))
+        self.send_interval = max(0.06, float(os.getenv('TELEGRAM_SEND_INTERVAL_SECONDS', '0.06')))
         self.router = Router()
         self.router.message.register(self.message)
         self.router.callback_query.register(self.callback)
@@ -96,7 +123,7 @@ class App:
     async def send(self, uid, operation, **kwargs):
         # Single global limiter; <=20 operations/s, <=1 operation/s per private chat.
         async with self.send_lock:
-            await asyncio.sleep(max(0, self.last_chat.get(uid, 0) + 1.1 - time.monotonic()))
+            await asyncio.sleep(max(0, self.last_chat.get(uid, 0) + self.chat_interval - time.monotonic()))
             while True:
                 try:
                     result = await operation(**kwargs)
@@ -104,7 +131,7 @@ class App:
                 except TelegramRetryAfter as exc:
                     await asyncio.sleep(exc.retry_after + 1)
             self.last_chat[uid] = time.monotonic()
-            await asyncio.sleep(0.06)
+            await asyncio.sleep(self.send_interval)
             return result
 
     async def say(self, uid, message, **kwargs):
@@ -127,7 +154,7 @@ class App:
             result = await self.api.call('GET', '/jobs', uid)
             command = value.split('@', 1)[0].split(' ', 1)[0]
             if command in {'/start', '/help'}:
-                await self.say(uid, ('Добро пожаловать в BOX4ONE!\n' if command == '/start' else '') + HELP)
+                await self.say(uid, ('Добро пожаловать в BOX4ONE!\n' if command == '/start' else '') + self.help)
             elif command in {'/status', '/myjobs'}:
                 entries = result['jobs'][:1] if command == '/status' else result['jobs']
                 if not entries:
@@ -141,7 +168,7 @@ class App:
                     callback_data=f"new:{draft['draft_id']}:{fmt}")] for label, fmt in FORMATS])
                 await self.say(uid, 'Выберите формат:', reply_markup=keys)
             else:
-                await self.say(uid, HELP)
+                await self.say(uid, self.help)
         except APIError as exc:
             if exc.status >= 500:
                 raise
@@ -278,6 +305,13 @@ async def main():
     try:
         state = await api.call('POST', '/runtime', json={'owner': owner})
         offset = state['offset']
+        with suppress(TelegramBadRequest, TelegramNetworkError, TelegramRetryAfter):
+            await bot.set_my_commands([
+                BotCommand(command='start', description='Начать работу'),
+                BotCommand(command='status', description='Последнее задание'),
+                BotCommand(command='myjobs', description='Последние задания'),
+                BotCommand(command='help', description='Справка, лимиты и сроки хранения'),
+            ])
         lease_task = asyncio.create_task(renew_lease())
         notification_task = asyncio.create_task(app.notifications())
         while True:

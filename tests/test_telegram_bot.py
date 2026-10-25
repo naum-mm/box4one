@@ -1,4 +1,5 @@
 import asyncio
+import os
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -8,7 +9,7 @@ from aiogram.client.session.base import BaseSession
 from aiogram.exceptions import TelegramRetryAfter, TelegramNetworkError
 from aiogram.methods import SendMessage, SendDocument
 from aiogram.types import Message, Update
-from telegram_bot.bot import API, APIError, App, BackendFile, STATUSES, text
+from telegram_bot.bot import API, APIError, App, BackendFile, STATUSES, text, help_text
 
 UID = 10000000001
 JOB = dict(job_code='abc123def4', status='queued', completed_items=0, total_items=0,
@@ -62,6 +63,25 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.session.calls), 4)
         self.assertIn('BOX4ONE', self.session.calls[0].text)
         self.assertIn('нет заданий', self.session.calls[-1].text)
+
+    async def test_help_describes_configured_limits_and_retention(self):
+        with patch.dict(os.environ, {'MAX_JOB_GB': '3.5', 'JOB_TTL_MINUTES': '45',
+            'TELEGRAM_LINK_TTL_SECONDS': '180', 'VIDEO_PLAYLIST_LIMIT': '12',
+            'AUDIO_PLAYLIST_LIMIT': '24', 'TELEGRAM_HISTORY_LIMIT': '10',
+            'TELEGRAM_MAX_ACTIVE_JOBS': '1'}):
+            message = help_text(10000000)
+        for expected in ('3.5 ГиБ', '45 мин', '3 мин', '12 видео', '24 аудиофайлов',
+                         'последние 10', 'до 1', '10 МБ', 'ZIP', 'временные файлы'):
+            self.assertIn(expected, message)
+        await self.event('/help')
+        self.assertEqual(self.session.calls[-1].text, self.app.help)
+
+    async def test_size_and_playlist_failures_explain_limits(self):
+        for reason in ('job_size_limit', 'playlist_limit'):
+            message = text(dict(JOB, status='failed', failure_reason=reason))
+            self.assertIn('Превышен лимит', message)
+            self.assertIn('/help', message)
+            self.assertNotIn('другую ссылку', message)
 
     async def test_private_chats_and_allowlist(self):
         await self.event('/start', chat_type='group')

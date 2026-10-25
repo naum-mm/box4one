@@ -42,6 +42,19 @@ class DeploymentTests(unittest.TestCase):
         self.configure('init', '--domain', 'video.example.com')
         self.assertEqual((self.root / 'nginx/nginx.conf').read_text(), config)
 
+    def test_single_env_contains_settings_and_rejects_invalid_history(self):
+        self.assertEqual(self.configure('init', '--domain', 'video.example.com').returncode, 0)
+        path = self.root / '.env'
+        original = path.read_text()
+        for key in ('TELEGRAM_HISTORY_LIMIT=10', 'MAX_JOB_GB=2', 'TELEGRAM_PUBLIC_URL=',
+                    'TELEGRAM_UPLOAD_LIMIT_BYTES=49000000', 'COMPOSE_PROFILES='):
+            self.assertIn(key, original)
+        self.assertEqual(self.configure('check').returncode, 0)
+        path.write_text(original.replace('TELEGRAM_HISTORY_LIMIT=10', 'TELEGRAM_HISTORY_LIMIT=0'))
+        self.assertNotEqual(self.configure('check').returncode, 0)
+        path.write_text(original + 'TELEGRAM_HISTORY_LIMIT=10\n')
+        self.assertNotEqual(self.configure('check').returncode, 0)
+
     @unittest.skipUnless(os.geteuid() == 0, 'Uninstaller requires root; tested only against mocked Docker and temporary data')
     def test_uninstall_requires_marker_and_explicit_purge(self):
         shutil.copy(SOURCE / 'uninstall.sh', self.root / 'uninstall.sh')

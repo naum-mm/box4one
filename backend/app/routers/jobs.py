@@ -61,7 +61,7 @@ ARCHIVE_CHUNK_SIZE = (
 
 
 archive_gate = threading.BoundedSemaphore(
-    value=1
+    value=max(1, int(os.getenv('ARCHIVE_MAX_CONCURRENT', '1')))
 )
 
 

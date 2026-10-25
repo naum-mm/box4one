@@ -70,9 +70,17 @@ def describe_file(job, record):
 
 def describe(row, job):
     state = jobs.get_effective_status(job)
+    failure_reason = None
+    if state == 'failed':
+        error = job.error_message or ''
+        if error.startswith('Задание остановлено: превышен предел размера задания'):
+            failure_reason = 'job_size_limit'
+        elif error.startswith('Playlist limit exceeded:'):
+            failure_reason = 'playlist_limit'
     return dict(job_code=job.job_code, status=state, completed_items=job.completed_items,
                 total_items=job.total_items, message_id=row.message_id, last_text=row.last_text,
                 terminal_notified=row.terminal_notified,
+                failure_reason=failure_reason,
                 files=[describe_file(job, f)
                        for f in sorted(job.files, key=lambda f: f.id) if f.status == 'ready']
                       if state == 'completed' else [])
@@ -106,7 +114,7 @@ def draft(request: Draft, owner=Depends(user), db: Session = Depends(get_db)):
         count = db.scalar(select(func.count()).select_from(TelegramRequest).where(
             TelegramRequest.telegram_id == owner.telegram_id,
             TelegramRequest.created_at > datetime.utcnow() - timedelta(hours=1)))
-        if count >= 60:
+        if count >= int(os.getenv('TELEGRAM_MAX_DRAFTS_PER_HOUR', '60')):
             raise HTTPException(429, 'Слишком много ссылок. Повторите позже')
         row = TelegramRequest(id=secrets.token_hex(16), telegram_id=owner.telegram_id,
                               source_message_id=request.source_message_id, source_url=request.source_url)
@@ -125,7 +133,7 @@ def create(request: Create, owner=Depends(user), db: Session = Depends(get_db)):
         raise HTTPException(404, 'Ссылка не найдена')
     if row.job_id:
         return describe(row, db.get(Job, row.job_id))
-    if row.created_at < datetime.utcnow() - timedelta(hours=1):
+    if row.created_at < datetime.utcnow() - timedelta(minutes=int(os.getenv('TELEGRAM_DRAFT_TTL_MINUTES', '60'))):
         raise HTTPException(410, 'Отправьте ссылку заново')
     count = db.scalar(select(func.count()).select_from(TelegramRequest).join(Job).where(
         TelegramRequest.telegram_id == owner.telegram_id, Job.status.in_(ACTIVE)))
@@ -142,18 +150,22 @@ def create(request: Create, owner=Depends(user), db: Session = Depends(get_db)):
 
 
 @router.get('/jobs')
-def listing(pending: bool = False, limit: int = Query(10, ge=1, le=100),
+def listing(pending: bool = False, limit: int | None = Query(None, ge=1, le=100),
             before: str | None = Query(None, pattern=r'^[a-f0-9]{32}$'),
             owner=Depends(user), db: Session = Depends(get_db)):
     query = select(TelegramRequest).where(TelegramRequest.telegram_id == owner.telegram_id,
                                         TelegramRequest.job_id.is_not(None))
     if pending:
+        limit = limit or 100
         query = query.where(TelegramRequest.terminal_notified.is_(False))
-    if before:
+    else:
+        history_limit = max(1, min(100, int(os.getenv('TELEGRAM_HISTORY_LIMIT', '10'))))
+        limit = min(limit or history_limit, history_limit)
+    if before and pending:
         query = query.where(TelegramRequest.id < before)
     rows = db.scalars(query.order_by(TelegramRequest.id.desc() if pending else TelegramRequest.job_id.desc()).limit(limit)).all()
     return {'jobs': [describe(row, db.get(Job, row.job_id)) for row in rows],
-            'next': rows[-1].id if len(rows) == limit else None}
+            'next': rows[-1].id if pending and len(rows) == limit else None}
 
 
 @router.get('/jobs/{code}')
