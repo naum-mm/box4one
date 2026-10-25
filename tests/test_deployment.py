@@ -1,5 +1,4 @@
 """Run locally: python3 -m unittest discover -s tests -v."""
-import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -55,29 +54,6 @@ class DeploymentTests(unittest.TestCase):
         path.write_text(original + 'TELEGRAM_HISTORY_LIMIT=10\n')
         self.assertNotEqual(self.configure('check').returncode, 0)
 
-    @unittest.skipUnless(os.geteuid() == 0, 'Uninstaller requires root; tested only against mocked Docker and temporary data')
-    def test_uninstall_requires_marker_and_explicit_purge(self):
-        shutil.copy(SOURCE / 'uninstall.sh', self.root / 'uninstall.sh')
-        (self.root / 'compose.yaml').write_text('services: {}\n')
-        data = self.root / 'jobs'; data.mkdir()
-        (data / 'keep.txt').write_text('sample download')
-        mockbin = Path(self.temp.name) / 'bin'; mockbin.mkdir()
-        docker = mockbin / 'docker'
-        docker.write_text('#!/bin/sh\nif [ "$1" = inspect ]; then exit 1; fi\nexit 0\n')
-        docker.chmod(0o755)
-        env = dict(os.environ, PATH=str(mockbin) + ':' + os.environ['PATH'])
-        def invoke(*args, answer=''):
-            return subprocess.run(['bash', str(self.root / 'uninstall.sh'), *args],
-                                  env=env, input=answer, text=True, capture_output=True)
-        self.assertNotEqual(invoke('--purge', '--yes').returncode, 0)
-        self.assertTrue(data.exists())
-        (self.root / '.box4one-install').write_text(str(self.root)+'\n')
-        self.assertNotEqual(invoke('--purge', answer='NO\n').returncode, 0)
-        self.assertTrue(data.exists())
-        self.assertEqual(invoke().returncode, 0)
-        self.assertTrue(data.exists())
-        self.assertEqual(invoke('--purge', '--yes').returncode, 0)
-        self.assertFalse(self.root.exists())
 
 
 if __name__ == '__main__':

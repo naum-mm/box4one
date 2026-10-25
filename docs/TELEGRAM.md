@@ -54,21 +54,19 @@ Nginx, бот и проверяющий загрузки прокси получ
 
 1. Создайте обычного бота через BotFather; запишите его токен и разрешённые ID в `.env`.
 2. Задайте отдельный `TELEGRAM_INTERNAL_TOKEN` и `COMPOSE_PROFILES=telegram`.
-3. Сделайте резервную копию рабочей БД и конфигурации.
-4. Проверьте настройки, соберите образы и выполните additive миграцию:
+3. Скачайте актуальный единый скрипт управления и выполните обновление:
 
 ```bash
-python3 scripts/configure.py check
-docker compose config --quiet
-docker compose build
-docker compose run --rm --no-deps backend python -m app.telegram_migrate
-docker compose up -d --wait
+curl -fsSL https://raw.githubusercontent.com/naum-mm/box4one/main/bootstrap.sh -o /tmp/box4one.sh
+sudo bash /tmp/box4one.sh update
 ```
 
-Миграция создаёт telegram_users, telegram_requests и telegram_runtime и не заменяет
-jobs/files. Её выполняет один оператор, явно, до запуска бота. Startup backend
-не выполняет Telegram-миграцию автоматически. Домен и HTTPS должны быть настроены.
-При обновлении дождитесь завершения активных заданий перед пересозданием worker.
+Обновление сохраняет конфигурацию и историю в архиве, собирает образы и выполняет
+повторяемую добавочную миграцию до запуска бота. Таблицы jobs/files сохраняются.
+При локальном ручном развёртывании миграция остаётся явной командой
+`docker compose run --rm --no-deps backend python -m app.telegram_migrate` после
+создания основных таблиц. Startup backend не запускает миграцию автоматически.
+Домен и HTTPS должны работать. Завершите активные загрузки перед обновлением.
 
 ## Общая очередь и доступ
 
