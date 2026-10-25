@@ -60,7 +60,8 @@ def describe(row, job):
     return dict(job_code=job.job_code, status=state, completed_items=job.completed_items,
                 total_items=job.total_items, message_id=row.message_id, last_text=row.last_text,
                 terminal_notified=row.terminal_notified,
-                files=[dict(file_id=f.id, filename=f.filename, size_bytes=f.size_bytes)
+                files=[dict(file_id=f.id, filename=f.filename, size_bytes=f.size_bytes,
+                            media_type=f.media_type)
                        for f in sorted(job.files, key=lambda f: f.id) if f.status == 'ready']
                       if state == 'completed' else [])
 

@@ -6,6 +6,7 @@ import re
 import secrets
 import time
 from contextlib import suppress
+from pathlib import PurePath
 
 import httpx
 from aiogram import Bot, Dispatcher, Router
@@ -187,8 +188,15 @@ class App:
                 job = await self.api.call('GET', f'/jobs/{code}', uid)
                 file = next((f for f in job['files'] if str(f['file_id']) == item), None)
                 if action == 'file' and file and file['size_bytes'] <= self.limit:
-                    await self.send(uid, self.bot.send_document, chat_id=uid,
-                        document=BackendFile(self.api, uid, code, file, self.limit))
+                    upload = BackendFile(self.api, uid, code, file, self.limit)
+                    suffix = PurePath(file['filename']).suffix.lower()
+                    if file.get('media_type') == 'video' and suffix == '.mp4':
+                        await self.send(uid, self.bot.send_video, chat_id=uid,
+                            video=upload, supports_streaming=True)
+                    elif file.get('media_type') == 'audio' and suffix in {'.mp3', '.m4a'}:
+                        await self.send(uid, self.bot.send_audio, chat_id=uid, audio=upload)
+                    else:
+                        await self.send(uid, self.bot.send_document, chat_id=uid, document=upload)
                 else:
                     link = await self.api.call('POST', f'/jobs/{code}/links/{item}', uid)
                     await self.say(uid, 'Ссылка действует ограниченное время и до окончания хранения задания.',

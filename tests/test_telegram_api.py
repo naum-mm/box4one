@@ -71,7 +71,9 @@ class TelegramAPITests(unittest.TestCase):
                 name = f'{i}.mp4'
                 (root / name).write_bytes(b'data')
                 db.add(File(job_id=job.id, filename=name, relative_path=name, size_bytes=size, media_type='video'))
-        return self.call('GET', f'/jobs/{code}').json()['files']
+        files = self.call('GET', f'/jobs/{code}').json()['files']
+        self.assertTrue(all(file['media_type'] == 'video' for file in files))
+        return files
 
     def test_migration_repeatable_preserves_jobs_and_tables(self):
         code = self.create()

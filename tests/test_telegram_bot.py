@@ -25,7 +25,7 @@ class FakeSession(BaseSession):
 
     async def make_request(self, bot, method, timeout=None):
         self.calls.append(method)
-        if method.__api_method__ in {'sendMessage', 'editMessageText', 'sendDocument'}:
+        if method.__api_method__ in {'sendMessage', 'editMessageText', 'sendDocument', 'sendVideo', 'sendAudio'}:
             return Message(message_id=5, date=0, chat={'id': UID, 'type': 'private'}, text='ok')
         return True
 
@@ -110,14 +110,35 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn(state, STATUSES)
 
     async def test_small_upload_and_large_link(self):
-        file = dict(file_id=1, filename='video.mp4', size_bytes=4)
+        file = dict(file_id=1, filename='video.mp4', size_bytes=4, media_type='video')
         self.api.call.return_value = dict(JOB, status='completed', files=[file])
         await self.callback('file:abc123def4:1')
-        self.assertIsInstance(self.session.calls[-1].document, BackendFile)
+        self.assertEqual(self.session.calls[-1].__api_method__, 'sendVideo')
+        self.assertTrue(self.session.calls[-1].supports_streaming)
+        self.assertIsInstance(self.session.calls[-1].video, BackendFile)
         self.api.call.side_effect = [dict(JOB, status='completed', files=[dict(file, size_bytes=50000000)]),
                                      {'url': 'https://example.com/signed'}]
         await self.callback('file:abc123def4:1')
         self.assertEqual(self.session.calls[-1].reply_markup.inline_keyboard[0][0].url, 'https://example.com/signed')
+
+    async def test_audio_uses_music_player(self):
+        for filename in ('track.mp3', 'track.M4A'):
+            with self.subTest(filename=filename):
+                file = dict(file_id=1, filename=filename, size_bytes=4, media_type='audio')
+                self.api.call.return_value = dict(JOB, status='completed', files=[file])
+                await self.callback('file:abc123def4:1')
+                self.assertEqual(self.session.calls[-1].__api_method__, 'sendAudio')
+                self.assertIsInstance(self.session.calls[-1].audio, BackendFile)
+
+    async def test_unsupported_or_unknown_media_uses_document(self):
+        for media_type, filename in [('video', 'video.webm'), ('audio', 'track.flac'),
+                                     (None, 'unknown.mp4'), ('audio', 'mismatch.mp4')]:
+            with self.subTest(media_type=media_type, filename=filename):
+                file = dict(file_id=1, filename=filename, size_bytes=4, media_type=media_type)
+                self.api.call.return_value = dict(JOB, status='completed', files=[file])
+                await self.callback('file:abc123def4:1')
+                self.assertEqual(self.session.calls[-1].__api_method__, 'sendDocument')
+                self.assertIsInstance(self.session.calls[-1].document, BackendFile)
 
     async def test_telegram_connection_loss_leaves_notification_pending(self):
         method = SendMessage(chat_id=UID, text='test')
