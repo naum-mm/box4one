@@ -139,15 +139,56 @@ class TelegramAPITests(unittest.TestCase):
         self.assertEqual(statuses.count(201), 2, statuses)
         self.assertEqual(statuses.count(429), 4, statuses)
 
-    def test_cross_user_isolation_and_public_bypass(self):
+    def test_cross_user_isolation_in_telegram(self):
         code = self.create()
         file = self.complete(code)[0]
         for method, path in [('GET', f'/jobs/{code}'), ('GET', f'/jobs/{code}/files/{file["file_id"]}'),
                              ('POST', f'/jobs/{code}/links/{file["file_id"]}')]:
             self.assertEqual(self.call(method, path, OTHER).status_code, 404)
         self.assertEqual(self.call('GET', '/jobs', OTHER).json()['jobs'], [])
-        for suffix in ['', '/archive', f'/files/{file["file_id"]}/download']:
-            self.assertEqual(self.client.get(f'/api/jobs/{code}{suffix}').status_code, 404)
+
+    def test_web_and_telegram_jobs_share_queue_and_detail(self):
+        telegram_code = self.create()
+        created = self.client.post('/api/jobs', json={
+            'source_url': 'https://example.com/web', 'media_type': 'audio', 'quality': '128'},
+            headers={'X-Download-Access': 'download-test-only'})
+        self.assertEqual(created.status_code, 201)
+        web_code = created.json()['job_code']
+        self.assertEqual(self.client.get('/api/queue').status_code, 403)
+        queue = self.client.get('/api/queue', headers={'X-Queue-Access': 'queue-test-only'})
+        self.assertEqual(queue.status_code, 200)
+        jobs_in_queue = {j['job_code']: j for j in queue.json()['jobs']}
+        self.assertEqual(set(jobs_in_queue), {telegram_code, web_code})
+        self.assertEqual(queue.json()['queued'], 2)
+        self.assertEqual(jobs_in_queue[telegram_code]['queue_position'], 1)
+        self.assertEqual(jobs_in_queue[web_code]['queue_position'], 2)
+        for code in (telegram_code, web_code):
+            detail = self.client.get(f'/api/jobs/{code}')
+            self.assertEqual(detail.status_code, 200)
+            self.assertEqual(detail.json()['job_code'], code)
+            self.assertNotIn('telegram_id', detail.json())
+
+    def test_telegram_files_and_zip_work_through_web_interface(self):
+        import io
+        import zipfile
+        code = self.create()
+        files = self.complete(code, (4, 4))
+        detail = self.client.get(f'/api/jobs/{code}')
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(len(detail.json()['files']), 2)
+        for file in files:
+            response = self.client.get(f'/api/jobs/{code}/files/{file["file_id"]}/download')
+            self.assertEqual(response.status_code, 200)
+            self.assertIn(code, response.headers['x-accel-redirect'])
+        response = self.client.get(f'/api/jobs/{code}/archive')
+        self.assertEqual(response.status_code, 200)
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            self.assertEqual(sorted(archive.namelist()), ['0.mp4', '1.mp4'])
+            self.assertTrue(all(archive.read(name) == b'data' for name in archive.namelist()))
+        with SessionLocal.begin() as db:
+            db.scalar(select(Job).where(Job.job_code == code)).expires_at = datetime.utcnow() - timedelta(seconds=1)
+        self.assertEqual(self.client.get(f'/api/jobs/{code}/archive').status_code, 410)
+        self.assertEqual(self.client.get(f'/api/jobs/{code}/files/{files[0]["file_id"]}/download').status_code, 410)
 
     def test_foreign_file_and_path_traversal(self):
         code = self.create(); file = self.complete(code)[0]

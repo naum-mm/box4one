@@ -19,7 +19,7 @@ from fastapi import (
 
 from fastapi.responses import StreamingResponse
 
-from sqlalchemy import inspect, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.security import verify_download_access
@@ -517,13 +517,6 @@ def enqueue_job(db: Session, request: JobCreate) -> Job:
     return job
 
 
-def hide_telegram_job(db, job):
-    from app.telegram_models import TelegramRequest
-    if inspect(db.connection()).has_table(TelegramRequest.__tablename__):
-        if db.scalar(select(TelegramRequest.id).where(TelegramRequest.job_id == job.id)):
-            raise HTTPException(404, "Job not found")
-
-
 @router.post(
     "",
     response_model=JobCreateResponse,
@@ -582,7 +575,6 @@ def get_job(
             detail="Job not found",
         )
 
-    hide_telegram_job(db, job)
 
 
     return build_job_response(
@@ -619,7 +611,6 @@ def download_archive(
             detail="Job not found",
         )
 
-    hide_telegram_job(db, job)
 
 
     return stream_archive(job, db)
@@ -805,7 +796,6 @@ def download_file(
             detail="Job not found",
         )
 
-    hide_telegram_job(db, job)
 
 
     effective_status = (
