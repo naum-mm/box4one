@@ -17,3 +17,5 @@ __pycache__/
 *.sql
 *.sql.gz
 .DS_Store
+
+.test-deps/

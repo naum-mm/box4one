@@ -19,7 +19,7 @@ from fastapi import (
 
 from fastapi.responses import StreamingResponse
 
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 from sqlalchemy.orm import Session
 
 from app.security import verify_download_access
@@ -251,6 +251,7 @@ def resolve_job_file(
 
     try:
 
+        job_root.relative_to(JOBS_ROOT.resolve(strict=True))
         file_path.relative_to(
             job_root
         )
@@ -489,19 +490,7 @@ def build_archive_stream(
 # Create job
 # =========================================================
 
-@router.post(
-    "",
-    response_model=JobCreateResponse,
-    status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(verify_download_access)],
-)
-def create_job(
-    request: JobCreate,
-    db: Session = Depends(
-        get_db
-    ),
-):
-
+def enqueue_job(db: Session, request: JobCreate) -> Job:
     job_code = create_unique_job_code(
         db
     )
@@ -523,6 +512,32 @@ def create_job(
     db.add(
         job
     )
+
+    db.flush()
+    return job
+
+
+def hide_telegram_job(db, job):
+    from app.telegram_models import TelegramRequest
+    if inspect(db.get_bind()).has_table(TelegramRequest.__tablename__):
+        if db.scalar(select(TelegramRequest.id).where(TelegramRequest.job_id == job.id)):
+            raise HTTPException(404, "Job not found")
+
+
+@router.post(
+    "",
+    response_model=JobCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(verify_download_access)],
+)
+def create_job(
+    request: JobCreate,
+    db: Session = Depends(
+        get_db
+    ),
+):
+
+    job = enqueue_job(db, request)
 
     db.commit()
 
@@ -567,6 +582,8 @@ def get_job(
             detail="Job not found",
         )
 
+    hide_telegram_job(db, job)
+
 
     return build_job_response(
         job
@@ -602,7 +619,13 @@ def download_archive(
             detail="Job not found",
         )
 
+    hide_telegram_job(db, job)
 
+
+    return stream_archive(job, db)
+
+
+def stream_archive(job, db):
     effective_status = (
         get_effective_status(
             job
@@ -781,6 +804,8 @@ def download_file(
             status_code=404,
             detail="Job not found",
         )
+
+    hide_telegram_job(db, job)
 
 
     effective_status = (

@@ -1,4 +1,4 @@
-fastapi
-uvicorn[standard]
-SQLAlchemy
-PyMySQL
+fastapi==0.143.0
+uvicorn[standard]==0.54.0
+SQLAlchemy==2.1.4
+PyMySQL==1.2.3

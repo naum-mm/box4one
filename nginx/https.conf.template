@@ -91,6 +91,19 @@ server {
     # Public API
     # =====================================================
 
+    # Internal integration endpoints are reachable only on the Docker network.
+    location ^~ /api/integrations/telegram { return 404; }
+
+    # Capability links must not appear in access logs or browser referrers.
+    location ^~ /api/telegram-download/ {
+        access_log off;
+        error_log /dev/null;
+        proxy_pass http://backend:8000;
+        proxy_buffering off;
+        proxy_read_timeout 1h;
+        add_header Referrer-Policy "no-referrer" always;
+    }
+
     location /api/ {
         proxy_pass http://backend:8000;
 

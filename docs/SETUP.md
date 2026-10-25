@@ -187,3 +187,12 @@ docker compose ps
 Официальные инструкции:
 - Docker: https://docs.docker.com/engine/install/ubuntu/
 - Certbot webroot и renew: https://eff-certbot.readthedocs.io/en/stable/using.html
+
+## Необязательный Telegram-бот
+
+Профиль `telegram` добавляет личного Telegram-бота через общий API, MariaDB и worker.
+По умолчанию он отключён; установщик не требует Telegram-токенов. Существующие
+.env не переписываются. Настройка переменных, явная добавочная миграция, безопасность
+исходящих загрузок, включение/отключение и откат описаны в [TELEGRAM.md](TELEGRAM.md).
+Перед обновлением production обязательно проверьте тесты, резервную копию и
+локальные отличия Compose/Nginx. Для production FINN нужны отдельные разрешения.

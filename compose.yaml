@@ -66,6 +66,11 @@ services:
       DOWNLOAD_ACCESS_WORD: ${DOWNLOAD_ACCESS_WORD}
       QUEUE_ACCESS_WORD: ${QUEUE_ACCESS_WORD}
 
+      TELEGRAM_INTERNAL_TOKEN: ${TELEGRAM_INTERNAL_TOKEN:-}
+      TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS:-}
+      TELEGRAM_PUBLIC_URL: https://${DOMAIN}
+      TELEGRAM_MAX_ACTIVE_JOBS: ${TELEGRAM_MAX_ACTIVE_JOBS:-2}
+      TELEGRAM_LINK_TTL_SECONDS: ${TELEGRAM_LINK_TTL_SECONDS:-600}
       JOBS_ROOT: /data/ytdlp/jobs
 
     volumes:
@@ -106,6 +111,7 @@ services:
 
     networks:
       - ytdlp-network
+      - egress
 
 
   worker:
@@ -120,6 +126,7 @@ services:
     init: true
     environment:
       API_URL: http://backend:8000
+      NO_PROXY: ""
       WORKER_API_TOKEN: ${WORKER_API_TOKEN}
       JOBS_DIR: /data/ytdlp/jobs
       POLL_INTERVAL: ${POLL_INTERVAL}
@@ -134,6 +141,8 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+      download-proxy:
+        condition: service_started
     networks:
       - ytdlp-network
 
@@ -161,6 +170,47 @@ services:
     networks:
       - ytdlp-network
 
+  download-proxy:
+    build: ./download_proxy
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    pids_limit: 64
+    networks: [ytdlp-network, egress]
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
+  telegram-bot:
+    profiles: [telegram]
+    build: ./telegram_bot
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    pids_limit: 64
+    tmpfs: [/tmp:size=16m,mode=1777]
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_INTERNAL_TOKEN: ${TELEGRAM_INTERNAL_TOKEN:-}
+      TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS:-}
+      TELEGRAM_API_URL: http://backend:8000
+      TELEGRAM_POLL_SECONDS: ${TELEGRAM_POLL_SECONDS:-10}
+      TELEGRAM_UPLOAD_LIMIT_BYTES: ${TELEGRAM_UPLOAD_LIMIT_BYTES:-49000000}
+    depends_on:
+      backend: {condition: service_healthy}
+    networks: [ytdlp-network, egress]
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
 networks:
   ytdlp-network:
+    driver: bridge
+    internal: true
+  egress:
     driver: bridge
