@@ -130,6 +130,16 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(self.session.calls[-1].__api_method__, 'sendAudio')
                 self.assertIsInstance(self.session.calls[-1].audio, BackendFile)
 
+    async def test_video_preserves_display_dimensions(self):
+        for width, height in [(640, 360), (854, 480), (1080, 1920)]:
+            with self.subTest(width=width, height=height):
+                file = dict(file_id=1, filename='video.mp4', size_bytes=4, media_type='video',
+                            width=width, height=height)
+                self.api.call.return_value = dict(JOB, status='completed', files=[file])
+                await self.callback('file:abc123def4:1')
+                sent = self.session.calls[-1]
+                self.assertEqual((sent.width, sent.height), (width, height))
+
     async def test_unsupported_or_unknown_media_uses_document(self):
         for media_type, filename in [('video', 'video.webm'), ('audio', 'track.flac'),
                                      (None, 'unknown.mp4'), ('audio', 'mismatch.mp4')]:

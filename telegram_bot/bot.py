@@ -191,8 +191,10 @@ class App:
                     upload = BackendFile(self.api, uid, code, file, self.limit)
                     suffix = PurePath(file['filename']).suffix.lower()
                     if file.get('media_type') == 'video' and suffix == '.mp4':
+                        dimensions = {key: file[key] for key in ('width', 'height')
+                                      if isinstance(file.get(key), int) and 0 < file[key] <= 65535}
                         await self.send(uid, self.bot.send_video, chat_id=uid,
-                            video=upload, supports_streaming=True)
+                            video=upload, supports_streaming=True, **dimensions)
                     elif file.get('media_type') == 'audio' and suffix in {'.mp3', '.m4a'}:
                         await self.send(uid, self.bot.send_audio, chat_id=uid, audio=upload)
                     else:

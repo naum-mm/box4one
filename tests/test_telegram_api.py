@@ -166,6 +166,14 @@ class TelegramAPITests(unittest.TestCase):
         self.assertEqual(self.client.get(link[:-1] + ('0' if link[-1] != '0' else '1')).status_code, 403)
         self.assertEqual(self.client.get(link.replace(str(UID), str(OTHER))).status_code, 403)
 
+    def test_video_display_dimensions_are_in_file_details(self):
+        from test_mp4_metadata import video
+        code = self.create()
+        file = self.complete(code)[0]
+        (jobs.JOBS_ROOT / code / file['filename']).write_bytes(video(854, 480))
+        details = self.call('GET', f'/jobs/{code}').json()['files'][0]
+        self.assertEqual((details['width'], details['height']), (854, 480))
+
     def test_link_expiry_and_job_ttl(self):
         code = self.create(); file = self.complete(code)[0]
         link = self.call('POST', f'/jobs/{code}/links/{file["file_id"]}').json()['url']

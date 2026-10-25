@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Job, File
+from app.mp4_metadata import video_dimensions
 from app.schemas import JobCreate
 from app.telegram_models import TelegramRequest, TelegramUser, TelegramRuntime
 from app.url_safety import validate_url
@@ -55,13 +56,24 @@ def owned(code, owner, db):
     return row, db.get(Job, row.job_id)
 
 
+def describe_file(job, record):
+    result = dict(file_id=record.id, filename=record.filename,
+                  size_bytes=record.size_bytes, media_type=record.media_type)
+    if record.media_type == 'video' and record.filename.lower().endswith('.mp4'):
+        try:
+            path = jobs.resolve_job_file(job.job_code, record.relative_path)
+            result.update(video_dimensions(path))
+        except HTTPException:
+            pass  # A missing/expired file must not hide the job's status.
+    return result
+
+
 def describe(row, job):
     state = jobs.get_effective_status(job)
     return dict(job_code=job.job_code, status=state, completed_items=job.completed_items,
                 total_items=job.total_items, message_id=row.message_id, last_text=row.last_text,
                 terminal_notified=row.terminal_notified,
-                files=[dict(file_id=f.id, filename=f.filename, size_bytes=f.size_bytes,
-                            media_type=f.media_type)
+                files=[describe_file(job, f)
                        for f in sorted(job.files, key=lambda f: f.id) if f.status == 'ready']
                       if state == 'completed' else [])
 
