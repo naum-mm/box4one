@@ -5,8 +5,40 @@ import tempfile
 import unittest
 import wave
 
+from yt_dlp import YoutubeDL, parse_options
+from yt_dlp.networking import Request
+from yt_dlp.networking.exceptions import HTTPError
+from yt_dlp.networking.impersonate import ImpersonateTarget
+
 
 class WorkerMediaTests(unittest.TestCase):
+    def browser_downloader(self):
+        options = parse_options(['--config-locations', '/etc/yt-dlp.conf']).ydl_opts
+        self.assertEqual(options['proxy'], 'http://download-proxy:8080')
+        options['quiet'] = True
+        return YoutubeDL(options)
+
+    def test_browser_transport_available(self):
+        # Some extractors require this transport even without --impersonate.
+        with YoutubeDL({'quiet': True}) as downloader:
+            targets = downloader._get_available_impersonate_targets()
+        self.assertTrue(any(handler == 'curl_cffi' for _, handler in targets), targets)
+
+    def test_browser_transport_public_https_via_proxy(self):
+        with self.browser_downloader() as downloader:
+            request = Request('https://raw.githubusercontent.com/naum-mm/box4one/main/README.md',
+                              extensions={'impersonate': ImpersonateTarget()})
+            with downloader.urlopen(request) as response:
+                self.assertEqual(response.status, 200)
+                self.assertIn(b'BOX4ONE', response.read(16384))
+
+    def test_browser_transport_private_targets_blocked(self):
+        with self.browser_downloader() as downloader:
+            for target in ('http://backend/', 'http://127.0.0.1/', 'http://169.254.169.254/'):
+                with self.subTest(target=target), self.assertRaises(HTTPError) as ctx:
+                    downloader.urlopen(Request(target, extensions={'impersonate': ImpersonateTarget()}))
+                self.assertEqual(ctx.exception.status, 403)
+
     def test_local_audio_conversion_and_probe(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / 'sample.wav'
