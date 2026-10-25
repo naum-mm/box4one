@@ -2,3 +2,8 @@
 jobs
 mariadb
 .git
+
+.test-deps
+**/__pycache__
+
+.test-runtime

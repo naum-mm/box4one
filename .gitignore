@@ -9,6 +9,7 @@
 /nginx/pre-https.*
 /nginx/*.before-https
 .box4one-install
+.box4one-files.json
 __pycache__/
 *.py[cod]
 *.log
@@ -17,3 +18,7 @@ __pycache__/
 *.sql
 *.sql.gz
 .DS_Store
+
+.test-deps/
+
+.test-runtime/

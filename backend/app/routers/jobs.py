@@ -61,7 +61,7 @@ ARCHIVE_CHUNK_SIZE = (
 
 
 archive_gate = threading.BoundedSemaphore(
-    value=1
+    value=max(1, int(os.getenv('ARCHIVE_MAX_CONCURRENT', '1')))
 )
 
 
@@ -251,6 +251,7 @@ def resolve_job_file(
 
     try:
 
+        job_root.relative_to(JOBS_ROOT.resolve(strict=True))
         file_path.relative_to(
             job_root
         )
@@ -489,19 +490,7 @@ def build_archive_stream(
 # Create job
 # =========================================================
 
-@router.post(
-    "",
-    response_model=JobCreateResponse,
-    status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(verify_download_access)],
-)
-def create_job(
-    request: JobCreate,
-    db: Session = Depends(
-        get_db
-    ),
-):
-
+def enqueue_job(db: Session, request: JobCreate) -> Job:
     job_code = create_unique_job_code(
         db
     )
@@ -523,6 +512,25 @@ def create_job(
     db.add(
         job
     )
+
+    db.flush()
+    return job
+
+
+@router.post(
+    "",
+    response_model=JobCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(verify_download_access)],
+)
+def create_job(
+    request: JobCreate,
+    db: Session = Depends(
+        get_db
+    ),
+):
+
+    job = enqueue_job(db, request)
 
     db.commit()
 
@@ -568,6 +576,7 @@ def get_job(
         )
 
 
+
     return build_job_response(
         job
     )
@@ -603,6 +612,11 @@ def download_archive(
         )
 
 
+
+    return stream_archive(job, db)
+
+
+def stream_archive(job, db):
     effective_status = (
         get_effective_status(
             job
@@ -781,6 +795,7 @@ def download_file(
             status_code=404,
             detail="Job not found",
         )
+
 
 
     effective_status = (

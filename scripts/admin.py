@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SERVICES = ('mariadb', 'backend', 'nginx', 'worker', 'cleanup')
+SERVICES = ('mariadb', 'backend', 'nginx', 'worker', 'cleanup', 'download-proxy')
 COMPOSE = ['docker', 'compose', '--project-directory', str(ROOT), '-f', str(ROOT / 'compose.yaml')]
 
 
@@ -57,7 +57,10 @@ def diagnose(_):
     run(['free', '-h'])
     if run(COMPOSE + ['ps', '-a']).returncode:
         return 1
-    for service in SERVICES:
+    optional = run(COMPOSE + ['--profile', 'telegram', 'ps', '-a', '-q', 'telegram-bot'], True)
+    enabled = bool(optional.stdout.strip())
+    print('Telegram: ' + ('включён' if enabled else 'отключён (необязательный компонент)'))
+    for service in SERVICES + (('telegram-bot',) if enabled else ()):
         ids = run(COMPOSE + ['ps', '-a', '-q', service], True)
         cid = ids.stdout.strip()
         if ids.returncode or not cid:
@@ -152,7 +155,7 @@ def main():
     p = sub.add_parser('diagnose', help='Проверить контейнеры, память, диск, HTTP, Nginx и БД')
     p.set_defaults(func=diagnose)
     p = sub.add_parser('logs', help='Показать логи сервисов')
-    p.add_argument('service', nargs='?', choices=('all',) + SERVICES, default='all')
+    p.add_argument('service', nargs='?', choices=('all',) + SERVICES + ('telegram-bot',), default='all')
     p.add_argument('-f', '--follow', action='store_true')
     p.add_argument('--tail', type=positive, default=200)
     p.add_argument('--since', default='1h', help='Например 30m, 24h, 168h или timestamp')

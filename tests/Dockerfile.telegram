@@ -1,0 +1,8 @@
+FROM python:3.13-slim
+WORKDIR /workspace
+COPY backend/requirements.txt /tmp/backend.txt
+COPY telegram_bot/requirements.txt /tmp/bot.txt
+RUN pip install --no-cache-dir -r /tmp/backend.txt -r /tmp/bot.txt
+COPY . .
+ENV PYTHONPATH=/workspace/backend:/workspace
+CMD ["python", "-m", "unittest", "discover", "-s", "tests", "-v"]

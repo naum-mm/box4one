@@ -1,0 +1,4 @@
+#!/bin/sh
+# Network downloads belong to yt-dlp through the checked proxy. FFmpeg only
+# processes local media; remote HLS manifests cannot reach internal services.
+exec /usr/bin/ffmpeg.real -protocol_whitelist file,pipe,crypto,data "$@"

@@ -11,11 +11,13 @@ from app.routers import (
     jobs,
     queue,
     worker,
+    telegram,
 )
 
 
 Base.metadata.create_all(
-    bind=engine
+    bind=engine,
+    tables=[models.Job.__table__, models.File.__table__],
 )
 
 
@@ -50,3 +52,6 @@ def health():
     return {
         "status": "ok",
     }
+
+app.include_router(telegram.router)
+app.include_router(telegram.download_router)
