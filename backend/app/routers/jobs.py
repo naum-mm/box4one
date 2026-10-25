@@ -519,7 +519,7 @@ def enqueue_job(db: Session, request: JobCreate) -> Job:
 
 def hide_telegram_job(db, job):
     from app.telegram_models import TelegramRequest
-    if inspect(db.get_bind()).has_table(TelegramRequest.__tablename__):
+    if inspect(db.connection()).has_table(TelegramRequest.__tablename__):
         if db.scalar(select(TelegramRequest.id).where(TelegramRequest.job_id == job.id)):
             raise HTTPException(404, "Job not found")
 

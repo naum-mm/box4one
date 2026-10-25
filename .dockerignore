@@ -5,3 +5,5 @@ mariadb
 
 .test-deps
 **/__pycache__
+
+.test-runtime

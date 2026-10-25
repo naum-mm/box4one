@@ -9,7 +9,9 @@ services:
       MARIADB_PASSWORD: test-only
     volumes: [test-db:/var/lib/mysql]
     networks: [test]
-    mem_limit: 512m
+    mem_limit: 128m
+    memswap_limit: 256m
+    cpus: 0.5
     command: [--innodb-buffer-pool-size=32M, --performance-schema=OFF, --max-connections=20]
     healthcheck:
       test: [CMD, healthcheck.sh, --connect, --innodb_initialized]
@@ -35,7 +37,9 @@ services:
     depends_on:
       db: {condition: service_healthy}
     networks: [test]
-    mem_limit: 512m
+    mem_limit: 192m
+    memswap_limit: 384m
+    cpus: 0.5
 networks:
   test: {internal: true}
 volumes:

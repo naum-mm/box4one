@@ -1,5 +1,6 @@
 import ipaddress
 import socket
+from socket import getaddrinfo
 from urllib.parse import urlsplit
 from fastapi import HTTPException
 
@@ -11,7 +12,7 @@ def validate_url(url: str):
                 or not parts.hostname or parts.username or parts.password
                 or parts.port not in {None, 80, 443}):
             raise ValueError()
-        addresses = socket.getaddrinfo(parts.hostname, parts.port or 443, type=socket.SOCK_STREAM)
+        addresses = getaddrinfo(parts.hostname, parts.port or 443, type=socket.SOCK_STREAM)
         if not addresses or any((not ipaddress.ip_address(a[4][0]).is_global or ipaddress.ip_address(a[4][0]).is_multicast) for a in addresses):
             raise ValueError()
     except (ValueError, OSError):

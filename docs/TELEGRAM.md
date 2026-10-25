@@ -2,11 +2,10 @@
 
 ## Статус первой версии
 
-Интеграция подготовлена для проверки в PR. Production не обновлялся.
+Автоматизированные тесты команд, API и миграций выполняются на отдельной MariaDB
+с синтетическими данными. Результаты — в [TELEGRAM-VALIDATION.md](TELEGRAM-VALIDATION.md).
 Реальный токен не предоставлен: отправка настоящих сообщений не проверена.
-Полный набор интеграционных тестов и миграций на отдельной MariaDB **должен пройти
-до включения**. Причины ограничений тестовой среды и дальнейшие действия описаны в приватном
-отчёте владельцу. Не используйте production-БД для тестирования.
+Production в ходе разработки не обновлялся.
 
 ## Архитектура
 
@@ -101,7 +100,8 @@ unique user/message, уведомление), `telegram_runtime` (offset и ар
 Перед установкой сопоставьте файлы с проверенным commit PR и сохраните локальные
 отличия Compose, env_file и Nginx. Для конфигурации с несколькими сайтами переносите
 изменения выборочно, сохраняя остальные виртуальные хосты.
-1. Завершить тесты на целевом сервере после обеспечения согласованного запаса RAM.
+1. Проверить результаты тестов и совместимость ваших источников. Для повторного
+   прогона на целевом сервере используйте приведённые ниже ограничения памяти.
 2. Получить разрешение на резервную копию, production-обновление, миграцию,
    изменение `.env`/Nginx и запуск настоящего бота.
 3. Сделать и проверить резервную копию, сохранить образы и конфигурацию отката.
@@ -218,13 +218,34 @@ Backend/веб-очередь и worker продолжают работать. �
 
 ## Изолированные тесты
 
-После обеспечения безопасного запаса RAM на целевом сервере:
+Тесты запускаются на целевом сервере с отдельными сетью, volume и MariaDB.
+Тестовая БД ограничена 128 МБ RAM, runner — 192 МБ; отдельно ограничены swap и CPU.
+При недостатке RAM администратор должен заранее настроить swap на этом же сервере.
+Не используйте production-БД и не переносите тесты на другой сервер.
 
 ```bash
 docker compose -p box4one-telegram-test -f tests/compose.telegram.yaml build tests
 docker compose -p box4one-telegram-test -f tests/compose.telegram.yaml up -d db
 docker compose -p box4one-telegram-test -f tests/compose.telegram.yaml run --rm tests
 docker compose -p box4one-telegram-test -f tests/compose.telegram.yaml stop db
+```
+
+Реальные образы можно проверить отдельным дополнением
+`tests/compose.telegram.runtime.yaml`. Собирайте сервисы backend, download-proxy,
+telegram-bot и worker последовательно. В этом дополнении бот выполняет только
+импорт модуля: настоящий polling и обращения к Telegram не запускаются.
+`check_telegram_runtime.py` проверяет HTTP API, живой прокси и обработку задания
+существующим worker. `check_worker_runtime.py` проверяет локальную обработку
+синтетического аудио и запрет сетевого FFmpeg. Запускайте их отдельно от основного
+набора: основной набор очищает только свою тестовую БД между тестами.
+
+Команды дополнительных проверок после последовательной сборки:
+
+```bash
+docker compose -p box4one-telegram-test -f tests/compose.telegram.yaml -f tests/compose.telegram.runtime.yaml up -d --no-build backend download-proxy worker
+docker compose -p box4one-telegram-test -f tests/compose.telegram.yaml -f tests/compose.telegram.runtime.yaml run --rm --no-deps tests python tests/check_telegram_runtime.py
+docker compose -p box4one-telegram-test -f tests/compose.telegram.yaml -f tests/compose.telegram.runtime.yaml run --rm --no-deps -v "$PWD/tests:/checks:ro" worker python /checks/check_worker_runtime.py
+docker compose -p box4one-telegram-test -f tests/compose.telegram.yaml -f tests/compose.telegram.runtime.yaml stop worker backend download-proxy db
 ```
 
 У тестовой конфигурации нет внешних портов, production bind mounts и фиксированных

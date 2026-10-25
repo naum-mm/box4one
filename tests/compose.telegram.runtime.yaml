@@ -1,0 +1,53 @@
+# Layer over compose.telegram.yaml. No production resources or published ports.
+services:
+  backend:
+    extends:
+      file: compose.telegram.yaml
+      service: tests
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    command: null
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=5)"]
+      interval: 5s
+      timeout: 6s
+      retries: 30
+  download-proxy:
+    build: ../download_proxy
+    networks: [test, test-egress]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 64m
+    memswap_limit: 128m
+    cpus: 0.25
+  worker:
+    build: ../worker
+    environment:
+      API_URL: http://backend:8000
+      WORKER_API_TOKEN: worker-test-token
+      JOBS_DIR: /tmp/jobs
+      MIN_FREE_GB: '0.1'
+      MAX_JOB_GB: '0.1'
+      POLL_INTERVAL: '2'
+      NO_PROXY: ''
+    networks: [test]
+    depends_on:
+      backend: {condition: service_healthy}
+      download-proxy: {condition: service_started}
+    mem_limit: 128m
+    memswap_limit: 256m
+    cpus: 0.5
+  telegram-bot:
+    build: ../telegram_bot
+    # Import only: no live bot token, no Telegram requests.
+    command: [python, -c, 'import bot; print("bot import OK")']
+    networks: [test]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 96m
+    memswap_limit: 192m
+networks:
+  test-egress:

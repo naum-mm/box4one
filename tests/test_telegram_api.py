@@ -35,7 +35,7 @@ class TelegramAPITests(unittest.TestCase):
             db.query(Job).delete()
             db.query(TelegramRuntime).delete()
             db.add(TelegramRuntime(id=1))
-        self.dns = patch('app.url_safety.socket.getaddrinfo', return_value=[
+        self.dns = patch('app.url_safety.getaddrinfo', return_value=[
             (2, 1, 6, '', ('93.184.216.34', 443))])
         self.dns.start()
         self.addCleanup(self.dns.stop)
@@ -214,7 +214,7 @@ class TelegramAPITests(unittest.TestCase):
             self.assertEqual(self.call('POST', '/drafts', json={'source_url': url, 'source_message_id': 1}).status_code, 422)
         draft = self.draft()
         self.assertEqual(self.call('POST', '/jobs', json={'draft_id': draft, 'format': 'v320', 'message_id': 5}).status_code, 422)
-        with patch('app.url_safety.socket.getaddrinfo', return_value=[(2, 1, 6, '', ('127.0.0.1', 80))]):
+        with patch('app.url_safety.getaddrinfo', return_value=[(2, 1, 6, '', ('127.0.0.1', 80))]):
             self.assertEqual(self.call('POST', '/drafts', json={'source_url': 'http://localhost/', 'source_message_id': 2}).status_code, 422)
 
     def test_draft_ownership_and_expiry(self):

@@ -119,6 +119,21 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
         await self.callback('file:abc123def4:1')
         self.assertEqual(self.session.calls[-1].reply_markup.inline_keyboard[0][0].url, 'https://example.com/signed')
 
+    async def test_telegram_connection_loss_leaves_notification_pending(self):
+        method = SendMessage(chat_id=UID, text='test')
+        self.app.send = AsyncMock(side_effect=TelegramNetworkError(method=method, message='connection lost'))
+        with self.assertRaises(TelegramNetworkError):
+            await self.app.update(UID, dict(JOB, status='completed'))
+        self.api.call.assert_not_awaited()
+
+    async def test_already_edited_message_recovers_notification_after_restart(self):
+        from aiogram.exceptions import TelegramBadRequest
+        method = SendMessage(chat_id=UID, text='test')
+        self.app.send = AsyncMock(side_effect=TelegramBadRequest(method=method, message='message is not modified'))
+        await self.app.update(UID, dict(JOB, status='completed'))
+        self.assertTrue(self.api.call.await_args.kwargs['json']['terminal'])
+        self.assertEqual(self.api.call.await_args.kwargs['json']['message_id'], 5)
+
     async def test_rate_limit_retry(self):
         app = App(self.api, self.bot, {UID})
         method = SendMessage(chat_id=UID, text='test')
