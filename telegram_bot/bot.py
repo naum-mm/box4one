@@ -4,14 +4,17 @@ import logging
 import os
 import re
 import secrets
+import signal
 import time
 from contextlib import suppress
 from pathlib import PurePath
 
 import httpx
 from aiogram import Bot, Dispatcher, Router
-from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramNetworkError, TelegramRetryAfter
-from aiogram.types import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, LinkPreviewOptions
+from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.client.telegram import TelegramAPIServer
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramForbiddenError, TelegramNetworkError, TelegramRetryAfter
+from aiogram.types import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, LinkPreviewOptions, ReplyKeyboardMarkup, KeyboardButton
 
 STATUSES = {'queued': 'В очереди', 'downloading': 'Загрузка', 'processing': 'Обработка',
             'completed': 'Готово', 'failed': 'Ошибка обработки. Попробуйте другую ссылку.',
@@ -19,6 +22,28 @@ STATUSES = {'queued': 'В очереди', 'downloading': 'Загрузка', 'p
 FORMATS = [('Видео 1080p', 'v1080'), ('Видео 720p', 'v720'), ('Видео 480p', 'v480'),
            ('MP3 320', 'a320'), ('MP3 128', 'a128')]
 TERMINAL = {'completed', 'failed', 'expired'}
+
+
+WELCOME = 'Добро пожаловать в BOX4ONE! Введите кодовое слово для активации. Его можно получить у владельца сервиса.'
+MENU = ReplyKeyboardMarkup(keyboard=[
+    [KeyboardButton(text='🎬 Скачать видео'), KeyboardButton(text='🎵 Скачать аудио')],
+    [KeyboardButton(text='📋 Мои задания'), KeyboardButton(text='ℹ️ Информация')]], resize_keyboard=True)
+
+
+def local_enabled():
+    return os.getenv('TELEGRAM_LOCAL_API_ENABLED', 'false').lower() == 'true'
+
+
+def make_bot():
+    session = AiohttpSession(timeout=900 if local_enabled() else 90)
+    if local_enabled():
+        from urllib.parse import urlsplit
+        base = os.getenv('TELEGRAM_LOCAL_API_URL', 'http://telegram-api:8081').rstrip('/')
+        parsed = urlsplit(base)
+        if parsed.scheme != 'http' or parsed.hostname != 'telegram-api' or parsed.port != 8081 or parsed.path:
+            raise ValueError('Local API must use the private telegram-api:8081 service')
+        session.api = TelegramAPIServer.from_base(base, is_local=True)
+    return Bot(os.environ['TELEGRAM_BOT_TOKEN'], session=session)
 
 
 def help_text(upload_limit):
@@ -108,11 +133,13 @@ def keyboard(job):
 
 
 class App:
-    def __init__(self, api, bot, allowed):
+    def __init__(self, api, bot, allowed=None):
         self.api, self.bot, self.allowed = api, bot, allowed
         self.send_lock = asyncio.Lock()
         self.last_chat = {}
-        self.limit = min(max(int(os.getenv('TELEGRAM_UPLOAD_LIMIT_BYTES', '49000000')), 1), 49000000)
+        self.local = local_enabled()
+        cap = 2000000000 if self.local else 49000000
+        self.limit = min(max(int(os.getenv('TELEGRAM_LOCAL_UPLOAD_LIMIT_BYTES' if self.local else 'TELEGRAM_UPLOAD_LIMIT_BYTES', str(cap))), 1), cap)
         self.help = help_text(self.limit)
         self.chat_interval = max(1.1, float(os.getenv('TELEGRAM_CHAT_INTERVAL_SECONDS', '1.1')))
         self.send_interval = max(0.06, float(os.getenv('TELEGRAM_SEND_INTERVAL_SECONDS', '0.06')))
@@ -124,11 +151,13 @@ class App:
         # Single global limiter; <=20 operations/s, <=1 operation/s per private chat.
         async with self.send_lock:
             await asyncio.sleep(max(0, self.last_chat.get(uid, 0) + self.chat_interval - time.monotonic()))
-            while True:
+            for attempt in range(3):
                 try:
                     result = await operation(**kwargs)
                     break
                 except TelegramRetryAfter as exc:
+                    if attempt == 2 or exc.retry_after > 30:
+                        raise
                     await asyncio.sleep(exc.retry_after + 1)
             self.last_chat[uid] = time.monotonic()
             await asyncio.sleep(self.send_interval)
@@ -142,20 +171,32 @@ class App:
         if message.chat.type != 'private' or not message.from_user:
             return
         uid = message.from_user.id
-        if uid not in self.allowed:
-            await self.say(uid, 'Доступ запрещён.')
-            return
         value = (message.text or '').strip()
         if len(value) > 2048:
             await self.say(uid, 'Сообщение слишком длинное. Максимум 2048 символов.')
             return
         try:
-            # Backend authorization also applies to commands.
+            access = await self.api.call('GET', '/access', uid)
+            command = value.split('@', 1)[0].split(' ', 1)[0]
+            if not access['activated']:
+                if command in {'/start', '/help'}:
+                    await self.say(uid, WELCOME)
+                else:
+                    if not value or len(value) > 128:
+                        await self.say(uid, WELCOME)
+                        return
+                    activated = await self.api.call('POST', '/activate', uid, json={'word': value})
+                    await self.say(uid, '✅ Доступ открыт. Выберите действие.' if activated['activated']
+                                   else 'Кодовое слово неверно. Попробуйте ещё раз.',
+                                   reply_markup=MENU if activated['activated'] else None)
+                return
             result = await self.api.call('GET', '/jobs', uid)
             command = value.split('@', 1)[0].split(' ', 1)[0]
-            if command in {'/start', '/help'}:
-                await self.say(uid, ('Добро пожаловать в BOX4ONE!\n' if command == '/start' else '') + self.help)
-            elif command in {'/status', '/myjobs'}:
+            if command in {'/start', '/help'} or value == 'ℹ️ Информация':
+                await self.say(uid, ('Добро пожаловать в BOX4ONE!\n' if command == '/start' else '') + self.help, reply_markup=MENU)
+            elif value in {'🎬 Скачать видео', '🎵 Скачать аудио'}:
+                await self.say(uid, 'Отправьте ссылку на видео или плейлист. Затем выберите 1080p / 720p / 480p или MP3 320 / MP3 128.')
+            elif command in {'/status', '/myjobs'} or value == '📋 Мои задания':
                 entries = result['jobs'][:1] if command == '/status' else result['jobs']
                 if not entries:
                     await self.say(uid, 'У вас пока нет заданий.')
@@ -178,7 +219,7 @@ class App:
         if not callback.message or callback.message.chat.type != 'private':
             return
         uid = callback.from_user.id
-        if uid not in self.allowed or callback.message.chat.id != uid:
+        if callback.message.chat.id != uid:
             await callback.answer('Доступ запрещён.')
             return
         with suppress(TelegramBadRequest):
@@ -214,29 +255,55 @@ class App:
             elif action in {'file', 'link'}:
                 job = await self.api.call('GET', f'/jobs/{code}', uid)
                 file = next((f for f in job['files'] if str(f['file_id']) == item), None)
-                if action == 'file' and file and file['size_bytes'] <= self.limit:
-                    upload = BackendFile(self.api, uid, code, file, self.limit)
-                    suffix = PurePath(file['filename']).suffix.lower()
-                    if file.get('media_type') == 'video' and suffix == '.mp4':
-                        dimensions = {key: file[key] for key in ('width', 'height')
-                                      if isinstance(file.get(key), int) and 0 < file[key] <= 65535}
-                        await self.send(uid, self.bot.send_video, chat_id=uid,
-                            video=upload, supports_streaming=True, **dimensions)
-                    elif file.get('media_type') == 'audio' and suffix in {'.mp3', '.m4a'}:
-                        await self.send(uid, self.bot.send_audio, chat_id=uid, audio=upload)
-                    else:
-                        await self.send(uid, self.bot.send_document, chat_id=uid, document=upload)
+                if action == 'file' and file:
+                    await self.deliver(uid, code, file)
                 else:
-                    link = await self.api.call('POST', f'/jobs/{code}/links/{item}', uid)
-                    await self.say(uid, 'Ссылка действует ограниченное время и до окончания хранения задания.',
-                        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
-                            text='Скачать', url=link['url'])]]))
+                    await self.send_link(uid, code, item)
+
         except APIError as exc:
             if exc.status >= 500:
                 raise
             await self.say(uid, exc.text)
         except ValueError:
             await self.say(uid, 'Кнопка недействительна. Используйте /status.')
+
+    async def send_link(self, uid, code, item):
+        link = await self.api.call('POST', f'/jobs/{code}/links/{item}', uid)
+        await self.say(uid, 'Скачать по защищённой HTTPS-ссылке. Ссылка действует ограниченное время и до окончания хранения задания.',
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='Скачать', url=link['url'])]]))
+
+    async def deliver(self, uid, code, file):
+        path = f"/jobs/{code}/files/{file['file_id']}/delivery"
+        claim = await self.api.call('POST', path, uid)
+        if not claim['send']:
+            if claim['state'] == 'sent':
+                await self.say(uid, '✅ Этот файл уже отправлен в чат.')
+            else:
+                await self.send_link(uid, code, str(file['file_id']))
+            return
+        state, message_id = 'fallback', None
+        try:
+            if max(file['size_bytes'], claim['size_bytes']) <= self.limit:
+                # Local API reads its readonly bind mount; bot never opens the file.
+                upload = claim['local_uri'] if self.local else BackendFile(self.api, uid, code, file, self.limit)
+                suffix = PurePath(file['filename']).suffix.lower()
+                if file.get('media_type') == 'video' and suffix == '.mp4':
+                    dimensions = {key: file[key] for key in ('width', 'height')
+                                  if isinstance(file.get(key), int) and 0 < file[key] <= 65535}
+                    result = await self.send(uid, self.bot.send_video, chat_id=uid,
+                        video=upload, supports_streaming=True, **dimensions)
+                elif file.get('media_type') == 'audio' and suffix in {'.mp3', '.m4a'}:
+                    result = await self.send(uid, self.bot.send_audio, chat_id=uid, audio=upload)
+                else:
+                    result = await self.send(uid, self.bot.send_document, chat_id=uid, document=upload)
+                state, message_id = 'sent', result.message_id
+        except (TelegramAPIError, APIError, httpx.HTTPError, OSError):
+            # A network timeout may mean Telegram accepted the file. Never upload again.
+            state = 'uncertain'
+            logging.warning('Передача файла не подтверждена; используется HTTPS-ссылка')
+        await self.api.call('PUT', path, uid, json={'claim': claim['claim'], 'state': state, 'message_id': message_id})
+        if state != 'sent':
+            await self.send_link(uid, code, str(file['file_id']))
 
     async def update(self, uid, job):
         value = text(job)
@@ -258,7 +325,17 @@ class App:
 
     async def notifications(self):
         while True:
-            for uid in sorted(self.allowed):
+            users, after = [], None
+            try:
+                while True:
+                    page = await self.api.call('GET', '/users', params={'after': after} if after else {})
+                    users.extend(page['users'])
+                    after = page['next']
+                    if after is None:
+                        break
+            except APIError:
+                logging.warning('Backend пользователей недоступен')
+            for uid in users:
                 cursor = None
                 try:
                     while True:
@@ -281,17 +358,17 @@ class App:
 
 async def main():
     api = API()
-    allowed = {int(v) for v in os.environ['TELEGRAM_ALLOWED_USERS'].split(',') if v.strip()}
-    if not allowed:
-        raise ValueError('Allowlist must not be empty')
-    bot = Bot(os.environ['TELEGRAM_BOT_TOKEN'])
-    app = App(api, bot, allowed)
+    bot = make_bot()
+    app = App(api, bot)
     dispatcher = Dispatcher()
     dispatcher.include_router(app.router)
     owner = secrets.token_hex(16)
     notification_task = None
     lease_task = None
     main_task = asyncio.current_task()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, main_task.cancel)
 
     async def renew_lease():
         while True:
@@ -311,7 +388,7 @@ async def main():
                 BotCommand(command='status', description='Последнее задание'),
                 BotCommand(command='myjobs', description='Последние задания'),
                 BotCommand(command='help', description='Справка, лимиты и сроки хранения'),
-            ])
+            ], request_timeout=20)
         lease_task = asyncio.create_task(renew_lease())
         notification_task = asyncio.create_task(app.notifications())
         while True:
@@ -319,7 +396,7 @@ async def main():
                 # Lease is renewed before long poll; duplicate instances fail closed.
                 await api.call('POST', '/runtime', json={'owner': owner, 'offset': offset})
                 updates = await bot.get_updates(offset=offset, timeout=25,
-                                               allowed_updates=['message', 'callback_query'])
+                                               allowed_updates=['message', 'callback_query'], request_timeout=35)
                 for update in updates:
                     try:
                         await dispatcher.feed_update(bot, update)
@@ -346,6 +423,8 @@ async def main():
             notification_task.cancel()
             with suppress(asyncio.CancelledError):
                 await notification_task
+        with suppress(APIError, httpx.HTTPError):
+            await api.call('DELETE', f'/runtime/{owner}')
         await bot.session.close()
         await api.client.aclose()
 
@@ -357,7 +436,7 @@ if __name__ == '__main__':
     logging.getLogger('httpx').setLevel(logging.CRITICAL)
     try:
         asyncio.run(main())
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, asyncio.CancelledError):
         pass
     except Exception:
         logging.error('Бот остановлен. Проверьте конфигурацию и доступность сервисов.')

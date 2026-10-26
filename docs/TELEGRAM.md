@@ -17,10 +17,16 @@ cleanup/config.env, telegram-bot.env, telegram-integration.env или Compose ov
 
 | Переменная | Значение по умолчанию и назначение |
 |---|---|
-| `COMPOSE_PROFILES` | Пусто — бот отключён; `telegram` — включён |
+| `COMPOSE_PROFILES` | Пусто — бот отключён; `telegram` — облако; `telegram,telegram-local` — локальный API |
 | `TELEGRAM_BOT_TOKEN` | Токен от BotFather |
 | `TELEGRAM_INTERNAL_TOKEN` | Отдельный случайный секрет, не менее 32 символов |
-| `TELEGRAM_ALLOWED_USERS` | Числовые Telegram ID через запятую |
+| `TELEGRAM_ALLOWED_USERS` | Старые ID; больше не обязательный allowlist |
+| `TELEGRAM_ACTIVATION_WORD` | `REDACTED_ACTIVATION_WORD`, активация доступа (не показывается в приветствии) |
+| `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` | Собственные credentials приложения Telegram для Local API |
+| `TELEGRAM_LOCAL_API_ENABLED` | `false`; включается после процедуры logOut |
+| `TELEGRAM_LOCAL_API_URL` | `http://telegram-api:8081`, внутренняя сеть |
+| `TELEGRAM_LOCAL_UPLOAD_LIMIT_BYTES` | `2000000000`, можно уменьшить |
+| `TELEGRAM_API_MEMORY` / `TELEGRAM_API_SWAP` | `256m` / `512m`, лимиты Local API |
 | `TELEGRAM_API_URL` | `http://backend:8000`, внутренний адрес backend |
 | `TELEGRAM_PUBLIC_URL` | Пусто — `https://DOMAIN`; HTTPS-адрес выдачи файлов |
 | `TELEGRAM_MAX_ACTIVE_JOBS` | `2`, активных заданий на пользователя |
@@ -52,8 +58,8 @@ Nginx, бот и проверяющий загрузки прокси получ
 
 ## Включение
 
-1. Создайте обычного бота через BotFather; запишите его токен и разрешённые ID в `.env`.
-2. Задайте отдельный `TELEGRAM_INTERNAL_TOKEN` и `COMPOSE_PROFILES=telegram`.
+1. Используйте существующий Bot Token из `.env`; для новой установки получите его у BotFather.
+2. Задайте отдельный `TELEGRAM_INTERNAL_TOKEN`, `TELEGRAM_ACTIVATION_WORD` и `COMPOSE_PROFILES=telegram`. Пользователь открывает `/start` и вводит слово; активация и лимит попыток хранятся в MariaDB.
 3. Скачайте актуальный единый скрипт управления и выполните обновление:
 
 ```bash
@@ -78,7 +84,7 @@ sudo bash /tmp/box4one.sh update
 Веб-админка сохраняет полную историю с пагинацией по 25 заданий. Случайный код
 задания открывается через обычный веб-интерфейс независимо от источника задания;
 доступ к списку очереди требует пароль очереди. Telegram API проверяет владельца
-и allowlist; Telegram ID не выдаётся через веб-API.
+и сохранённую активацию; Telegram ID не выдаётся через веб-API.
 
 Для одного токена запускайте ровно один polling-процесс. Cursor, дедупликация,
 черновики, lease и состояния уведомлений хранятся в общей MariaDB.
@@ -86,8 +92,8 @@ sudo bash /tmp/box4one.sh update
 ## Выдача файлов
 
 MP4 отправляется как видео с размерами и поворотом из MP4; MP3/M4A — как аудио.
-Остальные форматы отправляются документом. Файлы передаются блоками по 64 КиБ,
-без загрузки целиком в память. Более крупные файлы и ZIP доступны по подписанной
+Остальные форматы отправляются документом. В облачном режиме файлы передаются блоками по 64 КиБ,
+в локальном — по проверенному файловому URI, без загрузки целиком в память. Более крупные файлы, ошибки доставки и ZIP обрабатываются подписанной
 HTTPS-ссылке. Подпись ограничена сроком ссылки и сроком хранения задания;
 получатель может переслать ссылку до истечения срока.
 
@@ -98,7 +104,9 @@ Nginx не публикует `/api/integrations/telegram`; для подпис�
 а FFmpeg/ffprobe работают с локальными протоколами.
 
 Официальные ограничения: [Telegram Bot API](https://core.telegram.org/bots/api#sendvideo).
-Используется обычный облачный Bot API, без отдельного локального Bot API Server.
+Облачный режим сохраняется как исходный. Для файлов до 2000 MB включите официальный Local Bot API
+по [инструкции переключения, проверки ресурсов и отката](TELEGRAM-LOCAL-API.md).
+Учёт отправок в MariaDB предотвращает повторные загрузки после рестарта или сетевой неопределённости.
 
 ## Обслуживание
 

@@ -31,3 +31,21 @@ class TelegramRuntime(Base):
     owner: Mapped[str] = mapped_column(String(32), default='')
     lease_until: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     offset: Mapped[int] = mapped_column(BigInteger, default=0)
+
+
+class TelegramActivation(Base):
+    __tablename__ = 'telegram_activations'
+    telegram_id: Mapped[int] = mapped_column(ForeignKey('telegram_users.telegram_id'), primary_key=True)
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime)
+    window_started: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class TelegramDelivery(Base):
+    __tablename__ = 'telegram_deliveries'
+    telegram_id: Mapped[int] = mapped_column(ForeignKey('telegram_users.telegram_id'), primary_key=True)
+    file_id: Mapped[int] = mapped_column(ForeignKey('files.id', ondelete='CASCADE'), primary_key=True)
+    state: Mapped[str] = mapped_column(String(16), default='sending')
+    claim: Mapped[str] = mapped_column(String(32))
+    message_id: Mapped[int | None] = mapped_column(BigInteger)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

@@ -36,7 +36,7 @@ class FakeSession(BaseSession):
 
 class BotTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.api = SimpleNamespace(call=AsyncMock(return_value={'jobs': []}))
+        self.api = SimpleNamespace(call=AsyncMock(side_effect=self.response))
         self.session = FakeSession()
         self.bot = Bot('123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ123456789', session=self.session)
         self.app = App(self.api, self.bot, {UID})
@@ -45,6 +45,20 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
         self.app.send = instant
         self.dispatcher = Dispatcher()
         self.dispatcher.include_router(self.app.router)
+
+    async def response(self, method, path, uid=None, **kwargs):
+        if path == '/access':
+            return {'activated': True}
+        if path.endswith('/delivery'):
+            return {'send': True, 'claim': 'a'*32, 'size_bytes': 4, 'local_uri': 'file:///data/ytdlp/jobs/abc123def4/track.mp4'} if method == 'POST' else {'ok': True}
+        return {'jobs': []}
+
+    async def file_response(self, method, path, uid=None, **kwargs):
+        if path.endswith('/delivery'):
+            return await self.response(method, path, uid, **kwargs)
+        if '/links/' in path:
+            return {'url': 'https://example.com/signed'}
+        return self.file_job
 
     async def event(self, value, uid=UID, chat_type='private'):
         update = Update(update_id=1, message={'message_id': 1, 'date': 0,
@@ -83,12 +97,14 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('/help', message)
             self.assertNotIn('другую ссылку', message)
 
-    async def test_private_chats_and_allowlist(self):
+    async def test_private_chats_and_public_start(self):
         await self.event('/start', chat_type='group')
         self.assertEqual(self.session.calls, [])
+        self.api.call.side_effect = None
+        self.api.call.return_value = {'activated': False}
         await self.event('/start', uid=99)
-        self.assertEqual(self.session.calls[-1].text, 'Доступ запрещён.')
-        self.api.call.assert_not_awaited()
+        self.assertIn('кодовое слово', self.session.calls[-1].text)
+        self.assertNotIn('REDACTED_ACTIVATION_WORD', self.session.calls[-1].text)
 
     async def test_message_limit(self):
         await self.event('x' * 2049)
@@ -96,7 +112,7 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
         self.api.call.assert_not_awaited()
 
     async def test_url_and_format_buttons(self):
-        self.api.call.side_effect = [{'jobs': []}, {'draft_id': 'a' * 32}]
+        self.api.call.side_effect = [{'activated': True}, {'jobs': []}, {'draft_id': 'a' * 32}]
         await self.event('https://example.com/video')
         buttons = self.session.calls[-1].reply_markup.inline_keyboard
         self.assertEqual(len(buttons), 5)
@@ -131,13 +147,13 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_small_upload_and_large_link(self):
         file = dict(file_id=1, filename='video.mp4', size_bytes=4, media_type='video')
-        self.api.call.return_value = dict(JOB, status='completed', files=[file])
+        self.file_job = dict(JOB, status='completed', files=[file])
+        self.api.call.side_effect = self.file_response
         await self.callback('file:abc123def4:1')
         self.assertEqual(self.session.calls[-1].__api_method__, 'sendVideo')
         self.assertTrue(self.session.calls[-1].supports_streaming)
         self.assertIsInstance(self.session.calls[-1].video, BackendFile)
-        self.api.call.side_effect = [dict(JOB, status='completed', files=[dict(file, size_bytes=50000000)]),
-                                     {'url': 'https://example.com/signed'}]
+        self.file_job = dict(JOB, status='completed', files=[dict(file, size_bytes=50000000)])
         await self.callback('file:abc123def4:1')
         self.assertEqual(self.session.calls[-1].reply_markup.inline_keyboard[0][0].url, 'https://example.com/signed')
 
@@ -145,7 +161,8 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
         for filename in ('track.mp3', 'track.M4A'):
             with self.subTest(filename=filename):
                 file = dict(file_id=1, filename=filename, size_bytes=4, media_type='audio')
-                self.api.call.return_value = dict(JOB, status='completed', files=[file])
+                self.file_job = dict(JOB, status='completed', files=[file])
+                self.api.call.side_effect = self.file_response
                 await self.callback('file:abc123def4:1')
                 self.assertEqual(self.session.calls[-1].__api_method__, 'sendAudio')
                 self.assertIsInstance(self.session.calls[-1].audio, BackendFile)
@@ -155,7 +172,8 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(width=width, height=height):
                 file = dict(file_id=1, filename='video.mp4', size_bytes=4, media_type='video',
                             width=width, height=height)
-                self.api.call.return_value = dict(JOB, status='completed', files=[file])
+                self.file_job = dict(JOB, status='completed', files=[file])
+                self.api.call.side_effect = self.file_response
                 await self.callback('file:abc123def4:1')
                 sent = self.session.calls[-1]
                 self.assertEqual((sent.width, sent.height), (width, height))
@@ -165,7 +183,8 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
                                      (None, 'unknown.mp4'), ('audio', 'mismatch.mp4')]:
             with self.subTest(media_type=media_type, filename=filename):
                 file = dict(file_id=1, filename=filename, size_bytes=4, media_type=media_type)
-                self.api.call.return_value = dict(JOB, status='completed', files=[file])
+                self.file_job = dict(JOB, status='completed', files=[file])
+                self.api.call.side_effect = self.file_response
                 await self.callback('file:abc123def4:1')
                 self.assertEqual(self.session.calls[-1].__api_method__, 'sendDocument')
                 self.assertIsInstance(self.session.calls[-1].document, BackendFile)
@@ -218,3 +237,61 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
                     pass
         finally:
             await api.client.aclose()
+
+
+    async def test_local_upload_uses_path_for_51_and_101_mb_and_boundary(self):
+        with patch.dict(os.environ, TELEGRAM_LOCAL_API_ENABLED='true'):
+            self.app.local = True
+            self.app.limit = 2000000000
+            for size in (51000000, 101000000, 2000000000):
+                self.file_job = dict(JOB, status='completed', files=[dict(file_id=1, filename='video.mp4', size_bytes=size, media_type='video')])
+                self.api.call.side_effect = self.file_response
+                await self.callback('file:abc123def4:1')
+                self.assertEqual(self.session.calls[-1].video, 'file:///data/ytdlp/jobs/abc123def4/track.mp4')
+            self.file_job['files'][0]['size_bytes'] = 2000000001
+            await self.callback('file:abc123def4:1')
+            self.assertIn('HTTPS', self.session.calls[-1].text)
+
+    async def test_uncertain_delivery_and_local_api_failure_use_link(self):
+        self.file_job = dict(JOB, status='completed', files=[dict(file_id=1, filename='video.mp4', size_bytes=4, media_type='video')])
+        self.api.call.side_effect = self.file_response
+        self.app.send = AsyncMock(side_effect=[TelegramNetworkError(method=SendDocument(chat_id=UID, document='x'), message='offline'), Message(message_id=5, date=0, chat={'id': UID, 'type': 'private'})])
+        await self.callback('file:abc123def4:1')
+        self.assertEqual(self.app.send.await_count, 2)
+        self.assertIn('HTTPS', self.app.send.await_args.kwargs['text'])
+        result = next(c for c in self.api.call.await_args_list if c.args[0] == 'PUT')
+        self.assertEqual(result.kwargs['json']['state'], 'uncertain')
+
+    async def test_no_duplicate_upload_after_restart(self):
+        self.file_job = dict(JOB, status='completed', files=[dict(file_id=1, filename='video.mp4', size_bytes=4, media_type='video')])
+        async def recorded(method, path, uid=None, **kwargs):
+            if path.endswith('/delivery'):
+                return {'send': False, 'state': 'sent'}
+            return self.file_job
+        self.api.call.side_effect = recorded
+        await self.callback('file:abc123def4:1')
+        self.assertFalse(any(c.__api_method__ == 'sendVideo' for c in self.session.calls))
+        self.assertIn('уже отправлен', self.session.calls[-1].text)
+
+    async def test_rate_limit_has_finite_attempts(self):
+        app = App(self.api, self.bot)
+        operation = AsyncMock(side_effect=TelegramRetryAfter(method=SendMessage(chat_id=UID, text='x'), message='retry', retry_after=1))
+        with patch('telegram_bot.bot.asyncio.sleep', new_callable=AsyncMock):
+            with self.assertRaises(TelegramRetryAfter):
+                await app.send(UID, operation)
+        self.assertEqual(operation.await_count, 3)
+
+
+    async def test_local_endpoint_is_private_and_flag_controls_limit(self):
+        from telegram_bot.bot import make_bot
+        with patch.dict(os.environ, TELEGRAM_LOCAL_API_ENABLED='true', TELEGRAM_LOCAL_API_URL='http://telegram-api:8081', TELEGRAM_BOT_TOKEN='123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ123456789'):
+            app = App(self.api, self.bot)
+            self.assertEqual(app.limit, 2000000000)
+            bot = make_bot()
+            try:
+                self.assertIn('http://telegram-api:8081/', bot.session.api.api_url(bot.token, 'getMe'))
+            finally:
+                await bot.session.close()
+        with patch.dict(os.environ, TELEGRAM_LOCAL_API_ENABLED='true', TELEGRAM_LOCAL_API_URL='https://external.invalid'):
+            with self.assertRaises(ValueError):
+                make_bot()
