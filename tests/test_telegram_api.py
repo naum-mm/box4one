@@ -377,3 +377,17 @@ class TelegramAPITests(unittest.TestCase):
         self.assertEqual(self.call('PUT', path, json={'claim': claim['claim'], 'state': 'sent', 'message_id': 42}).status_code, 200)
         self.assertEqual(self.call('POST', path).json(), {'send': False, 'state': 'sent'})
         self.assertEqual(self.call('PUT', path, json={'claim': 'f'*32, 'state': 'sent'}).status_code, 404)
+
+
+    def test_size_fallback_can_be_reconsidered_after_transport_upgrade(self):
+        code = self.create(); file = self.complete(code)[0]
+        path = f"/jobs/{code}/files/{file['file_id']}/delivery"
+        claim = self.call('POST', path).json()
+        self.assertTrue(claim['send'])
+        self.assertEqual(self.call('PUT', path, json={'claim': claim['claim'], 'state': 'fallback'}).status_code, 200)
+        # No file was sent: allow a fresh manual request after switching to Local API.
+        retry = self.call('POST', path).json()
+        self.assertTrue(retry['send'])
+        self.assertNotEqual(claim['claim'], retry['claim'])
+        self.assertEqual(self.call('PUT', path, json={'claim': retry['claim'], 'state': 'uncertain'}).status_code, 200)
+        self.assertEqual(self.call('POST', path).json(), {'send': False, 'state': 'uncertain'})
