@@ -54,6 +54,18 @@ class DeploymentTests(unittest.TestCase):
         path.write_text(original + 'TELEGRAM_HISTORY_LIMIT=10\n')
         self.assertNotEqual(self.configure('check').returncode, 0)
 
+    def test_local_profiles_and_credentials_validate_together(self):
+        self.assertEqual(self.configure('init', '--domain', 'video.example.com').returncode, 0)
+        path = self.root / '.env'
+        values = dict(line.split('=',1) for line in path.read_text().splitlines() if '=' in line)
+        values.update(COMPOSE_PROFILES='telegram,telegram-local', TELEGRAM_LOCAL_API_ENABLED='true',
+                      TELEGRAM_BOT_TOKEN='123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ123456789',
+                      TELEGRAM_API_ID='12345', TELEGRAM_API_HASH='a'*32)
+        path.write_text(''.join(k+'='+v+'\n' for k,v in values.items()))
+        self.assertEqual(self.configure('check').returncode, 0)
+        path.write_text(path.read_text().replace('TELEGRAM_API_HASH='+'a'*32, 'TELEGRAM_API_HASH='))
+        self.assertNotEqual(self.configure('check').returncode, 0)
+
 
 
 if __name__ == '__main__':
