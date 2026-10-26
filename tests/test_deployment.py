@@ -92,3 +92,26 @@ class TelegramSwitchTests(unittest.TestCase):
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             self.assertIn('# retained comment', path.read_text())
             self.assertEqual(list(root.glob('.env.telegram-switch.*')), [])
+
+
+    def test_transport_cursor_reset_requires_stopped_poller_and_retains_audit(self):
+        import importlib.util
+        from unittest.mock import patch
+        spec = importlib.util.spec_from_file_location('telegram_switch_cursor', SOURCE / 'scripts/telegram_local.py')
+        module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            with patch.object(module, 'ROOT', root), patch.object(module, 'compose', side_effect=[
+                    subprocess.CompletedProcess([],0,stdout='backend\n'),
+                    subprocess.CompletedProcess([],0,stdout='123456\n')]):
+                module.reset_runtime_cursor('cloud', 'local')
+            import json
+            audit=root/'.telegram-transport-cursors.json'
+            record=json.loads(audit.read_text())[0]
+            self.assertEqual(record['previous_offset'],123456)
+            self.assertEqual(record['offset'],0)
+            self.assertEqual(audit.stat().st_mode & 0o777,0o600)
+            with patch.object(module, 'ROOT', root), patch.object(module, 'compose', return_value=
+                    subprocess.CompletedProcess([],0,stdout='backend\ntelegram-bot\n')) as call:
+                with self.assertRaises(RuntimeError): module.reset_runtime_cursor('local','cloud')
+                self.assertEqual(call.call_count,1)
