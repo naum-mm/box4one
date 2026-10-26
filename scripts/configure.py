@@ -66,6 +66,7 @@ def read():
         else:
             pattern = (r'[0-9]+:[A-Za-z0-9_-]+' if key == 'TELEGRAM_BOT_TOKEN' else
                        r'[0-9]+(?:,[0-9]+)*' if key == 'TELEGRAM_ALLOWED_USERS' else
+                       r'telegram(?:,telegram-local)?' if key == 'COMPOSE_PROFILES' else
                        r'[A-Za-z0-9_.-]*')
             if value and not re.fullmatch(pattern, value):
                 raise ValueError('Invalid ' + key)
