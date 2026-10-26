@@ -20,6 +20,9 @@ DEFAULTS = dict(
 OPTIONAL = dict(
     COMPOSE_PROFILES='', COMPOSE_PROJECT_NAME='ytdlp-web',
     TELEGRAM_BOT_TOKEN='', TELEGRAM_INTERNAL_TOKEN='', TELEGRAM_ALLOWED_USERS='',
+    TELEGRAM_ACTIVATION_WORD='LETSROCK', TELEGRAM_API_ID='', TELEGRAM_API_HASH='',
+    TELEGRAM_LOCAL_API_ENABLED='false', TELEGRAM_LOCAL_API_URL='http://telegram-api:8081',
+    TELEGRAM_LOCAL_UPLOAD_LIMIT_BYTES='2000000000', TELEGRAM_API_MEMORY='256m', TELEGRAM_API_SWAP='512m',
     TELEGRAM_PUBLIC_URL='', TELEGRAM_API_URL='http://backend:8000',
     TELEGRAM_MAX_ACTIVE_JOBS='2', TELEGRAM_POLL_SECONDS='10',
     TELEGRAM_UPLOAD_LIMIT_BYTES='49000000', TELEGRAM_LINK_TTL_SECONDS='600',
@@ -52,7 +55,7 @@ def read():
             raise ValueError('Unknown variable: ' + key)
         if key in supplied:
             raise ValueError('Duplicate variable: ' + key)
-        if key in {'TELEGRAM_PUBLIC_URL', 'TELEGRAM_API_URL'}:
+        if key in {'TELEGRAM_PUBLIC_URL', 'TELEGRAM_API_URL', 'TELEGRAM_LOCAL_API_URL'}:
             parts = urlsplit(value)
             if value and (parts.scheme not in {'http', 'https'} or not parts.hostname
                           or parts.username or parts.password or parts.query or parts.fragment
@@ -93,13 +96,25 @@ def read():
         if key.endswith(('_MEMORY', '_SWAP')) or key in {'DB_BUFFER_POOL_SIZE', 'LOG_MAX_SIZE'}:
             if not re.fullmatch(r'[1-9][0-9]*[kKmMgG]?', result[key]):
                 raise ValueError('Invalid size: ' + key)
-    if result['COMPOSE_PROFILES'] not in {'', 'telegram'}:
-        raise ValueError('COMPOSE_PROFILES must be empty or telegram')
+    if result['COMPOSE_PROFILES'] not in {'', 'telegram', 'telegram,telegram-local'}:
+        raise ValueError('COMPOSE_PROFILES must be empty, telegram or telegram,telegram-local')
     if result['EGRESS_NETWORK_EXTERNAL'] not in {'true', 'false'}:
         raise ValueError('EGRESS_NETWORK_EXTERNAL must be true or false')
-    if result['COMPOSE_PROFILES'] == 'telegram' and any(not result[key] for key in (
-            'TELEGRAM_BOT_TOKEN', 'TELEGRAM_INTERNAL_TOKEN', 'TELEGRAM_ALLOWED_USERS')):
-        raise ValueError('Telegram profile requires token, internal token and allowlist')
+    if 'telegram' in result['COMPOSE_PROFILES'].split(',') and any(not result[key] for key in (
+            'TELEGRAM_BOT_TOKEN', 'TELEGRAM_INTERNAL_TOKEN', 'TELEGRAM_ACTIVATION_WORD')):
+        raise ValueError('Telegram profile requires bot token, internal token and activation word')
+    if result['TELEGRAM_LOCAL_API_ENABLED'] not in {'true', 'false'}:
+        raise ValueError('TELEGRAM_LOCAL_API_ENABLED must be true or false')
+    limit = result['TELEGRAM_LOCAL_UPLOAD_LIMIT_BYTES']
+    if not limit.isdigit() or not 1 <= int(limit) <= 2000000000:
+        raise ValueError('Local upload limit must be between 1 and 2000000000 bytes')
+    if result['TELEGRAM_LOCAL_API_ENABLED'] == 'true':
+        if result['COMPOSE_PROFILES'] != 'telegram,telegram-local':
+            raise ValueError('Local API requires both Compose profiles')
+        if not result['TELEGRAM_API_ID'].isdigit() or int(result['TELEGRAM_API_ID']) <= 0 or not re.fullmatch(r'[a-fA-F0-9]{32}', result['TELEGRAM_API_HASH']):
+            raise ValueError('Local API requires your Telegram API ID and API hash')
+        if result['TELEGRAM_LOCAL_API_URL'] != 'http://telegram-api:8081':
+            raise ValueError('Local API must use the private telegram-api:8081 service')
     if result['DOWNLOAD_ACCESS_WORD'] == result['QUEUE_ACCESS_WORD']:
         raise ValueError('Access words must differ')
     return result, supplied

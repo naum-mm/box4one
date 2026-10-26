@@ -46,6 +46,7 @@ services:
       ARCHIVE_MAX_CONCURRENT: ${ARCHIVE_MAX_CONCURRENT:-1}
       TELEGRAM_INTERNAL_TOKEN: ${TELEGRAM_INTERNAL_TOKEN:-}
       TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS:-}
+      TELEGRAM_ACTIVATION_WORD: ${TELEGRAM_ACTIVATION_WORD:-LETSROCK}
       TELEGRAM_PUBLIC_URL: ${TELEGRAM_PUBLIC_URL:-https://${DOMAIN}}
       TELEGRAM_MAX_ACTIVE_JOBS: ${TELEGRAM_MAX_ACTIVE_JOBS:-2}
       TELEGRAM_HISTORY_LIMIT: ${TELEGRAM_HISTORY_LIMIT:-10}
@@ -153,9 +154,13 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_INTERNAL_TOKEN: ${TELEGRAM_INTERNAL_TOKEN:-}
       TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS:-}
+      TELEGRAM_ACTIVATION_WORD: ${TELEGRAM_ACTIVATION_WORD:-LETSROCK}
       TELEGRAM_API_URL: ${TELEGRAM_API_URL:-http://backend:8000}
       TELEGRAM_POLL_SECONDS: ${TELEGRAM_POLL_SECONDS:-10}
       TELEGRAM_UPLOAD_LIMIT_BYTES: ${TELEGRAM_UPLOAD_LIMIT_BYTES:-49000000}
+      TELEGRAM_LOCAL_API_ENABLED: ${TELEGRAM_LOCAL_API_ENABLED:-false}
+      TELEGRAM_LOCAL_API_URL: ${TELEGRAM_LOCAL_API_URL:-http://telegram-api:8081}
+      TELEGRAM_LOCAL_UPLOAD_LIMIT_BYTES: ${TELEGRAM_LOCAL_UPLOAD_LIMIT_BYTES:-2000000000}
       TELEGRAM_LINK_TTL_SECONDS: ${TELEGRAM_LINK_TTL_SECONDS:-600}
       TELEGRAM_MAX_ACTIVE_JOBS: ${TELEGRAM_MAX_ACTIVE_JOBS:-2}
       TELEGRAM_CHAT_INTERVAL_SECONDS: ${TELEGRAM_CHAT_INTERVAL_SECONDS:-1.1}
@@ -167,9 +172,42 @@ services:
       AUDIO_PLAYLIST_LIMIT: ${AUDIO_PLAYLIST_LIMIT}
     depends_on:
       backend: {condition: service_healthy}
-    networks: [internal, egress]
+    networks: [internal, egress, telegram-private]
+    stop_grace_period: 60s
+    logging: *logging
+  telegram-api:
+    profiles: [telegram-local]
+    image: box4one-telegram-api:tdlib-e3e9dd8e5b3d
+    build: ./telegram_api
+    restart: unless-stopped
+    init: true
+    user: '65532:65532'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
+    volumes:
+      - ./telegram-api-data:/var/lib/telegram-bot-api
+      - ./jobs:/data/ytdlp/jobs:ro
+    tmpfs: ['/tmp:size=16m,mode=1777']
+    mem_limit: ${TELEGRAM_API_MEMORY:-256m}
+    memswap_limit: ${TELEGRAM_API_SWAP:-512m}
+    cpus: ${SERVICE_CPU_LIMIT:-0.5}
+    pids_limit: 64
+    stop_grace_period: 60s
+    healthcheck:
+      test: [CMD, python, /app/health.py]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [telegram-private, egress]
     logging: *logging
 networks:
+  telegram-private:
+    internal: true
   internal:
     name: ${INTERNAL_NETWORK_NAME:-${COMPOSE_PROJECT_NAME:-ytdlp-web}_internal}
     driver: bridge
