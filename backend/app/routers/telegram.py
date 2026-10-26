@@ -328,12 +328,18 @@ class DeliveryResult(BaseModel):
 def claim_delivery(code: str, file_id: int, owner=Depends(user), db: Session = Depends(get_db)):
     job, record = ready_file(code, file_id, owner, db)
     row = db.get(TelegramDelivery, (owner.telegram_id, file_id))
-    if row:
+    if row and row.state != 'fallback':
         return {'send': False, 'state': row.state}
     path = jobs.resolve_job_file(code, record.relative_path)
-    row = TelegramDelivery(telegram_id=owner.telegram_id, file_id=file_id,
-                           claim=secrets.token_hex(16), state='sending')
-    db.add(row)
+    if row is None:
+        row = TelegramDelivery(telegram_id=owner.telegram_id, file_id=file_id,
+                               claim=secrets.token_hex(16), state='sending')
+        db.add(row)
+    else:
+        # fallback means the size check skipped Telegram entirely. A later manual
+        # click may now fit Local API after a cloud-to-local migration.
+        row.state, row.claim = 'sending', secrets.token_hex(16)
+        row.updated_at = datetime.utcnow()
     db.commit()  # Persist BEFORE contacting Telegram; ambiguous attempts never replay.
     return {'send': True, 'claim': row.claim, 'size_bytes': path.stat().st_size,
             'local_uri': path.as_uri()}
