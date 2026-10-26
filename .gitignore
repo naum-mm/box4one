@@ -25,3 +25,6 @@ __pycache__/
 
 /telegram-api-data/
 .env.telegram-switch
+
+.telegram-transport-cursors.json
+.telegram-cursors.*

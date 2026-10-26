@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Explicit migration only; never log out or change transports on bot startup."""
 import argparse
+import datetime
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -50,6 +52,39 @@ except Exception: raise SystemExit('Telegram API call failed; no response body l
     compose('run', '--rm', '--no-deps', 'telegram-bot', 'python', '-c', code, endpoint, method)
 
 
+def reset_runtime_cursor(previous, current):
+    """Offsets belong to one server queue; only run with the poller stopped."""
+    running = compose('ps', '--status', 'running', '--services', capture_output=True, text=True).stdout.split()
+    if 'telegram-bot' in running:
+        raise RuntimeError('Stop the polling process before changing queue offsets')
+    audit = ROOT / '.telegram-transport-cursors.json'
+    entries = json.loads(audit.read_text()) if audit.exists() else []
+    if not isinstance(entries, list):
+        raise ValueError('Invalid transport cursor audit')
+    code = """from datetime import datetime
+from app.database import SessionLocal
+from app.telegram_models import TelegramRuntime
+with SessionLocal.begin() as db:
+ state=db.get(TelegramRuntime,1,with_for_update=True)
+ assert state is not None
+ previous=state.offset
+ state.offset=0
+ state.owner=''
+ state.lease_until=datetime.utcnow()
+print(previous)
+"""
+    result = compose('run', '--rm', '--no-deps', 'backend', 'python', '-c', code,
+                     capture_output=True, text=True)
+    old_offset = int(result.stdout.strip().splitlines()[-1])
+    entries.append({'previous_transport': previous, 'previous_offset': old_offset,
+                    'transport': current, 'offset': 0,
+                    'at': datetime.datetime.now(datetime.timezone.utc).isoformat()})
+    with tempfile.NamedTemporaryFile('w', dir=ROOT, prefix='.telegram-cursors.', delete=False) as output:
+        json.dump(entries, output, indent=2)
+        temp = Path(output.name)
+    temp.replace(audit)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('mode', choices=['local', 'cloud'])
@@ -77,8 +112,9 @@ def main():
         write_settings({'TELEGRAM_LOCAL_API_ENABLED': 'true',
                         'TELEGRAM_LOCAL_API_URL': 'http://telegram-api:8081',
                         'COMPOSE_PROFILES': 'telegram,telegram-local'})
-        # Never drop_pending_updates; the durable MariaDB cursor is unchanged.
+        # Never drop_pending_updates. Archive the old server's cursor before polling the new queue.
         call('http://telegram-api:8081', 'getMe')
+        reset_runtime_cursor('cloud', 'local')
         compose('up', '-d', '--no-deps', 'telegram-bot')
         print('Local mode enabled. Cloud login is unavailable for 10 minutes after logOut.')
     else:
@@ -92,6 +128,7 @@ def main():
         time.sleep(600)
         write_settings({'TELEGRAM_LOCAL_API_ENABLED': 'false', 'COMPOSE_PROFILES': 'telegram'})
         call('https://api.telegram.org', 'getMe')
+        reset_runtime_cursor('local', 'cloud')
         compose('up', '-d', '--no-deps', 'telegram-bot')
         print('Cloud mode enabled; uploads are limited to 49 MB.')
 
