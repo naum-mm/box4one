@@ -82,9 +82,9 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
         with patch.dict(os.environ, {'MAX_JOB_GB': '3.5', 'JOB_TTL_MINUTES': '45',
             'TELEGRAM_LINK_TTL_SECONDS': '180', 'VIDEO_PLAYLIST_LIMIT': '12',
             'AUDIO_PLAYLIST_LIMIT': '24', 'TELEGRAM_HISTORY_LIMIT': '10',
-            'TELEGRAM_MAX_ACTIVE_JOBS': '1'}):
+            'MAX_ACTIVE_JOBS_PER_USER': '1'}):
             message = help_text(10000000)
-        for expected in ('3.5 ГиБ', '45 мин', '3 мин', '12 видео', '24 аудиофайлов',
+        for expected in ('3.5ГБ', '45 мин', 'не дольше срока хранения', '12 видео', '24 аудиофайлов',
                          'последние 10', 'до 1', '10 МБ', 'ZIP', 'временные файлы'):
             self.assertIn(expected, message)
         await self.event('/help')
@@ -104,7 +104,7 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
         self.api.call.return_value = {'activated': False}
         await self.event('/start', uid=99)
         self.assertIn('кодовое слово', self.session.calls[-1].text)
-        self.assertNotIn('REDACTED_ACTIVATION_WORD', self.session.calls[-1].text)
+        self.assertNotIn('test-activation-code', self.session.calls[-1].text)
 
     async def test_message_limit(self):
         await self.event('x' * 2049)
@@ -295,3 +295,15 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
         with patch.dict(os.environ, TELEGRAM_LOCAL_API_ENABLED='true', TELEGRAM_LOCAL_API_URL='https://external.invalid'):
             with self.assertRaises(ValueError):
                 make_bot()
+
+    async def test_single_full_row_download_button_and_requested_help(self):
+        from telegram_bot.bot import MENU
+        self.assertEqual(len(MENU.keyboard[0]), 1)
+        self.assertEqual(MENU.keyboard[0][0].text, '🍿 СКАЧАТЬ')
+        await self.event('🍿 СКАЧАТЬ')
+        self.assertEqual(self.session.calls[-1].reply_markup.keyboard[0][0].text, '🍿 СКАЧАТЬ')
+        with patch.dict(os.environ, MAX_JOB_GB='8', JOB_TTL_MINUTES='60', MAX_ACTIVE_JOBS_PER_USER='1'):
+            help = help_text(2000000000)
+        for expected in ('8ГБ', '60 мин', 'до 1.', '2000 МБ', '50 видео', '100 аудиофайлов', 'последние 10', 'не дольше срока хранения'):
+            self.assertIn(expected, help)
+        self.assertNotIn('600', help)

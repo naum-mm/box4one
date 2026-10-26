@@ -28,7 +28,7 @@ from app.security import verify_worker_token
 JOB_TTL_MINUTES = int(
     os.getenv(
         "JOB_TTL_MINUTES",
-        "180",
+        "60",
     )
 )
 

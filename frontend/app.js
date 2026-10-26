@@ -384,6 +384,19 @@ async function apiRequest(
 }
 
 
+// Establish a browser identity before admission; values come from the backend.
+const serviceLimitsReady = apiRequest('/api/limits').then(limits => {
+    const element = document.getElementById('serviceLimits');
+    if (element) element.textContent = `Лимит задания: ${limits.max_job_gb}ГБ, включая временные файлы.\n`
+        + `Плейлист: до ${limits.video_playlist_limit} видео или ${limits.audio_playlist_limit} аудиофайлов.\n`
+        + `Активных заданий: до ${limits.max_active_jobs_per_user}. Хранение файлов: ${limits.job_ttl_minutes} мин.`;
+    return limits;
+});
+serviceLimitsReady.catch(() => {
+    const element = document.getElementById('serviceLimits');
+    if (element) element.textContent = 'Не удалось загрузить лимиты сервиса. Обновите страницу.';
+});
+
 /* ===================================================== */
 /* ACCESS */
 /* ===================================================== */
@@ -718,6 +731,7 @@ formatButtons.forEach(
 
 
                 try {
+                    await serviceLimitsReady;
 
                     const result =
                         await apiRequest(

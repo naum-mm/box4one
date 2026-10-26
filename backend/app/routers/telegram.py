@@ -20,6 +20,7 @@ from app.schemas import JobCreate
 from app.telegram_models import TelegramRequest, TelegramUser, TelegramRuntime, TelegramActivation, TelegramDelivery
 from app.url_safety import validate_url
 from app.routers import jobs
+from app.limits import max_active_jobs
 
 router = APIRouter(prefix='/api/integrations/telegram')
 download_router = APIRouter(prefix='/api/telegram-download')
@@ -65,7 +66,7 @@ def access(uid=Depends(identity), db: Session = Depends(get_db)):
 
 @router.post('/activate')
 def activate(request: Activation, uid=Depends(identity), db: Session = Depends(get_db)):
-    word = os.getenv('TELEGRAM_ACTIVATION_WORD', 'REDACTED_ACTIVATION_WORD')
+    word = os.getenv('TELEGRAM_ACTIVATION_WORD', '')
     if not word:
         raise HTTPException(503, 'Активация отключена')
     now = datetime.utcnow()
@@ -190,7 +191,7 @@ def create(request: Create, owner=Depends(user), db: Session = Depends(get_db)):
         raise HTTPException(410, 'Отправьте ссылку заново')
     count = db.scalar(select(func.count()).select_from(TelegramRequest).join(Job).where(
         TelegramRequest.telegram_id == owner.telegram_id, Job.status.in_(ACTIVE)))
-    if count >= int(os.getenv('TELEGRAM_MAX_ACTIVE_JOBS', '2')):
+    if count >= max_active_jobs():
         raise HTTPException(429, 'Достигнут лимит активных заданий')
     validate_url(row.source_url)
     media, quality = FORMATS[request.format]

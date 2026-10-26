@@ -82,3 +82,24 @@ def verify_queue_access(request: Request, x_queue_access: str | None = Header(de
     if word_matches(x_queue_access, QUEUE_ACCESS_WORD) or webapp_mode(request) == "queue":
         return
     raise HTTPException(status_code=403, detail="Access denied")
+
+
+CLIENT_COOKIE = '__Host-box4one-client'
+
+
+def ensure_web_client(request, response):
+    """Opaque signed browser identity for quota, independent of shared access words."""
+    import re
+    value = request.cookies.get(CLIENT_COOKIE, '')
+    try:
+        identity, signature = value.split('.')
+        expected = hmac.new(SIGNING_KEY, ('client:' + identity).encode(), hashlib.sha256).hexdigest()
+        if re.fullmatch(r'[a-f0-9]{32}', identity) and hmac.compare_digest(signature, expected):
+            return identity
+    except ValueError:
+        pass
+    identity = secrets.token_hex(16)
+    signature = hmac.new(SIGNING_KEY, ('client:' + identity).encode(), hashlib.sha256).hexdigest()
+    response.set_cookie(CLIENT_COOKIE, identity + '.' + signature, max_age=ACCESS_SECONDS,
+                        secure=True, httponly=True, samesite='lax', path='/')
+    return identity

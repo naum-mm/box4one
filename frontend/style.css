@@ -1820,3 +1820,5 @@ input {
 #inlineMediaContainer video, #inlineMediaContainer audio { display: block; width: 100%; margin-top: 12px; }
 #inlineMediaContainer video { max-height: 70dvh; background: black; }
 #inlinePlaybackStatus:empty { display: none; }
+
+.service-limits { position: fixed; top: max(24px, calc(env(safe-area-inset-top) + 12px)); left: 50%; transform: translateX(-50%); width: min(90vw, 560px); padding: 0 1rem; margin: 0; color: var(--text-muted, #888); text-align: center; font-size: .85rem; line-height: 1.6; white-space: pre-line; }

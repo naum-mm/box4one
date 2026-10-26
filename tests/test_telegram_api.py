@@ -17,6 +17,7 @@ from app.telegram_models import TelegramUser, TelegramRequest, TelegramRuntime, 
 from app.telegram_migrate import migrate
 from app.routers import jobs
 
+ACTIVATION_WORD = os.environ['TELEGRAM_ACTIVATION_WORD']
 TOKEN = os.environ['TELEGRAM_INTERNAL_TOKEN']
 UID = 10000000001
 OTHER = 10000000002
@@ -41,7 +42,7 @@ class TelegramAPITests(unittest.TestCase):
             with SessionLocal.begin() as db:
                 if db.get(TelegramUser, uid):
                     db.get(TelegramUser, uid).enabled = True
-            response = self.call('POST', '/activate', uid, json={'word': 'REDACTED_ACTIVATION_WORD'})
+            response = self.call('POST', '/activate', uid, json={'word': ACTIVATION_WORD})
             self.assertTrue(response.json()['activated'])
         self.dns = patch('app.url_safety.getaddrinfo', return_value=[
             (2, 1, 6, '', ('93.184.216.34', 443))])
@@ -342,7 +343,7 @@ class TelegramAPITests(unittest.TestCase):
             self.assertEqual(self.call('GET', '/access', uid).json(), {'activated': False})
             self.assertEqual(self.call('GET', '/jobs', uid).status_code, 403)
             self.assertFalse(self.call('POST', '/activate', uid, json={'word': 'WRONG'}).json()['activated'])
-            self.assertTrue(self.call('POST', '/activate', uid, json={'word': 'REDACTED_ACTIVATION_WORD'}).json()['activated'])
+            self.assertTrue(self.call('POST', '/activate', uid, json={'word': ACTIVATION_WORD}).json()['activated'])
             migrate()
             with TestClient(app) as restarted:
                 self.assertTrue(restarted.get('/api/integrations/telegram/access', headers=self.headers(uid)).json()['activated'])
@@ -354,10 +355,10 @@ class TelegramAPITests(unittest.TestCase):
         for _ in range(5):
             self.assertEqual(self.call('POST', '/activate', uid, json={'word': 'WRONG'}).status_code, 200)
         migrate()
-        self.assertEqual(self.call('POST', '/activate', uid, json={'word': 'REDACTED_ACTIVATION_WORD'}).status_code, 429)
+        self.assertEqual(self.call('POST', '/activate', uid, json={'word': ACTIVATION_WORD}).status_code, 429)
         with SessionLocal.begin() as db:
             db.get(TelegramActivation, uid).window_started = datetime.utcnow() - timedelta(minutes=11)
-        self.assertTrue(self.call('POST', '/activate', uid, json={'word': 'REDACTED_ACTIVATION_WORD'}).json()['activated'])
+        self.assertTrue(self.call('POST', '/activate', uid, json={'word': ACTIVATION_WORD}).json()['activated'])
 
     def test_delivery_claim_serialized_and_durable_after_ambiguous_send(self):
         code = self.create(); file = self.complete(code)[0]
@@ -391,3 +392,14 @@ class TelegramAPITests(unittest.TestCase):
         self.assertNotEqual(claim['claim'], retry['claim'])
         self.assertEqual(self.call('PUT', path, json={'claim': retry['claim'], 'state': 'uncertain'}).status_code, 200)
         self.assertEqual(self.call('POST', path).json(), {'send': False, 'state': 'uncertain'})
+
+    def test_missing_private_word_disables_activation(self):
+        with patch.dict(os.environ, TELEGRAM_ACTIVATION_WORD=''):
+            self.assertEqual(self.call('POST', '/activate', 99900321, json={'word': ACTIVATION_WORD}).status_code, 503)
+
+    def test_shared_one_job_limit_applies_to_telegram(self):
+        with patch.dict(os.environ, MAX_ACTIVE_JOBS_PER_USER='1'):
+            self.create()
+            draft = self.draft(2)
+            response = self.call('POST', '/jobs', json={'draft_id': draft, 'format': 'v720', 'message_id': 8})
+            self.assertEqual(response.status_code, 429)

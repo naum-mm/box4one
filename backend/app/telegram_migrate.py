@@ -3,13 +3,15 @@ import os
 from sqlalchemy import select
 from app import models  # Register jobs/files for foreign-key resolution.
 from app.database import engine, SessionLocal
+from app.web_models import WebClient, WebRequest
 from app.telegram_models import TelegramUser, TelegramRequest, TelegramRuntime, TelegramActivation, TelegramDelivery
 
 
 def migrate():
     # checkfirst is repeatable; single operator runs migrations, never concurrent startup.
     for table in (TelegramUser.__table__, TelegramRequest.__table__, TelegramRuntime.__table__,
-                  TelegramActivation.__table__, TelegramDelivery.__table__):
+                  TelegramActivation.__table__, TelegramDelivery.__table__,
+                  WebClient.__table__, WebRequest.__table__):
         table.create(engine, checkfirst=True)
     ids = {int(value.strip()) for value in os.getenv('TELEGRAM_ALLOWED_USERS', '').split(',') if value.strip()}
     if any(value <= 0 or value > 2**63 - 1 for value in ids):
