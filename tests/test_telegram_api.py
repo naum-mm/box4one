@@ -13,7 +13,7 @@ from sqlalchemy import select, text
 from app.main import app
 from app.database import SessionLocal, engine
 from app.models import Job, File
-from app.telegram_models import TelegramUser, TelegramRequest, TelegramRuntime
+from app.telegram_models import TelegramUser, TelegramRequest, TelegramRuntime, TelegramActivation, TelegramDelivery
 from app.telegram_migrate import migrate
 from app.routers import jobs
 
@@ -30,11 +30,19 @@ class TelegramAPITests(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(app, raise_server_exceptions=True)
         with SessionLocal.begin() as db:
+            db.query(TelegramDelivery).delete()
+            db.query(TelegramActivation).delete()
             db.query(TelegramRequest).delete()
             db.query(File).delete()
             db.query(Job).delete()
             db.query(TelegramRuntime).delete()
             db.add(TelegramRuntime(id=1))
+        for uid in (UID, OTHER):
+            with SessionLocal.begin() as db:
+                if db.get(TelegramUser, uid):
+                    db.get(TelegramUser, uid).enabled = True
+            response = self.call('POST', '/activate', uid, json={'word': 'REDACTED_ACTIVATION_WORD'})
+            self.assertTrue(response.json()['activated'])
         self.dns = patch('app.url_safety.getaddrinfo', return_value=[
             (2, 1, 6, '', ('93.184.216.34', 443))])
         self.dns.start()
@@ -267,8 +275,9 @@ class TelegramAPITests(unittest.TestCase):
     def test_signed_link_revoked_when_user_removed(self):
         code = self.create(); file = self.complete(code)[0]
         link = self.call('POST', f'/jobs/{code}/links/{file["file_id"]}').json()['url']
-        with patch.dict(os.environ, TELEGRAM_ALLOWED_USERS=str(OTHER)):
-            self.assertEqual(self.client.get(link).status_code, 403)
+        with SessionLocal.begin() as db:
+            db.get(TelegramUser, UID).enabled = False
+        self.assertEqual(self.client.get(link).status_code, 403)
 
     def test_playlist_zip_stream(self):
         import io, zipfile
@@ -325,3 +334,46 @@ class TelegramAPITests(unittest.TestCase):
         self.assertEqual(self.client.post(f'/api/worker/jobs/{code}/failed', headers=worker,
                                         json={'error_message': 'test failure'}).status_code, 200)
         self.assertEqual(self.client.get(f'/api/jobs/{code}').json()['status'], 'failed')
+
+
+    def test_public_activation_persistent_and_no_allowlist(self):
+        uid = 999000123
+        with patch.dict(os.environ, TELEGRAM_ALLOWED_USERS=''):
+            self.assertEqual(self.call('GET', '/access', uid).json(), {'activated': False})
+            self.assertEqual(self.call('GET', '/jobs', uid).status_code, 403)
+            self.assertFalse(self.call('POST', '/activate', uid, json={'word': 'WRONG'}).json()['activated'])
+            self.assertTrue(self.call('POST', '/activate', uid, json={'word': 'REDACTED_ACTIVATION_WORD'}).json()['activated'])
+            migrate()
+            with TestClient(app) as restarted:
+                self.assertTrue(restarted.get('/api/integrations/telegram/access', headers=self.headers(uid)).json()['activated'])
+            self.assertEqual(self.call('GET', '/jobs', uid).status_code, 200)
+            self.assertIn(uid, self.call('GET', '/users').json()['users'])
+
+    def test_activation_attempts_bounded_persistent_and_reset(self):
+        uid = 999000124
+        for _ in range(5):
+            self.assertEqual(self.call('POST', '/activate', uid, json={'word': 'WRONG'}).status_code, 200)
+        migrate()
+        self.assertEqual(self.call('POST', '/activate', uid, json={'word': 'REDACTED_ACTIVATION_WORD'}).status_code, 429)
+        with SessionLocal.begin() as db:
+            db.get(TelegramActivation, uid).window_started = datetime.utcnow() - timedelta(minutes=11)
+        self.assertTrue(self.call('POST', '/activate', uid, json={'word': 'REDACTED_ACTIVATION_WORD'}).json()['activated'])
+
+    def test_delivery_claim_serialized_and_durable_after_ambiguous_send(self):
+        code = self.create(); file = self.complete(code)[0]
+        path = f"/jobs/{code}/files/{file['file_id']}/delivery"
+        def invoke(_):
+            return self.call('POST', path).json()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            claims = list(pool.map(invoke, range(4)))
+        self.assertEqual(sum(c['send'] for c in claims), 1)
+        claim = next(c for c in claims if c['send'])
+        self.assertTrue(claim['local_uri'].startswith(jobs.JOBS_ROOT.as_uri()))
+        self.assertEqual(claim['size_bytes'], 4)
+        self.assertEqual(self.call('POST', path, OTHER).status_code, 404)
+        # A restart while sending must never claim another upload.
+        migrate()
+        self.assertEqual(self.call('POST', path).json(), {'send': False, 'state': 'sending'})
+        self.assertEqual(self.call('PUT', path, json={'claim': claim['claim'], 'state': 'sent', 'message_id': 42}).status_code, 200)
+        self.assertEqual(self.call('POST', path).json(), {'send': False, 'state': 'sent'})
+        self.assertEqual(self.call('PUT', path, json={'claim': 'f'*32, 'state': 'sent'}).status_code, 404)

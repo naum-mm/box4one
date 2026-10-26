@@ -12,11 +12,12 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+from sqlalchemy.dialects.mysql import insert
 from app.database import get_db
 from app.models import Job, File
 from app.mp4_metadata import video_dimensions
 from app.schemas import JobCreate
-from app.telegram_models import TelegramRequest, TelegramUser, TelegramRuntime
+from app.telegram_models import TelegramRequest, TelegramUser, TelegramRuntime, TelegramActivation, TelegramDelivery
 from app.url_safety import validate_url
 from app.routers import jobs
 
@@ -40,12 +41,64 @@ def authorize(x_telegram_token: str = Header(default='')):
 
 
 def user(x_telegram_user: int = Header(gt=0, le=2**63-1), _=Depends(authorize), db: Session = Depends(get_db)):
-    # Environment and DB must both allow access; changes fail closed until migration.
-    allowed = {s.strip() for s in os.getenv('TELEGRAM_ALLOWED_USERS', '').split(',')}
     row = db.scalar(select(TelegramUser).where(TelegramUser.telegram_id == x_telegram_user).with_for_update())
-    if str(x_telegram_user) not in allowed or row is None or not row.enabled:
-        raise HTTPException(403, 'Доступ запрещён')
+    activation = db.get(TelegramActivation, x_telegram_user)
+    if row is None or not row.enabled or activation is None or activation.activated_at is None:
+        raise HTTPException(403, 'Требуется активация')
     return row
+
+
+class Activation(BaseModel):
+    word: str = Field(min_length=1, max_length=128)
+
+
+def identity(x_telegram_user: int = Header(gt=0, le=2**63-1), _=Depends(authorize)):
+    return x_telegram_user
+
+
+@router.get('/access')
+def access(uid=Depends(identity), db: Session = Depends(get_db)):
+    row = db.get(TelegramUser, uid)
+    activation = db.get(TelegramActivation, uid)
+    return {'activated': bool(row and row.enabled and activation and activation.activated_at)}
+
+
+@router.post('/activate')
+def activate(request: Activation, uid=Depends(identity), db: Session = Depends(get_db)):
+    word = os.getenv('TELEGRAM_ACTIVATION_WORD', 'REDACTED_ACTIVATION_WORD')
+    if not word:
+        raise HTTPException(503, 'Активация отключена')
+    now = datetime.utcnow()
+    # INSERT IGNORE + row lock serializes concurrent attempts on MariaDB.
+    db.execute(insert(TelegramUser).values(telegram_id=uid, enabled=True).prefix_with('IGNORE'))
+    owner = db.scalar(select(TelegramUser).where(TelegramUser.telegram_id == uid).with_for_update())
+    if not owner.enabled:
+        raise HTTPException(403, 'Доступ запрещён')
+    row = db.get(TelegramActivation, uid)
+    if row is None:
+        row = TelegramActivation(telegram_id=uid, attempts=0, window_started=now)
+        db.add(row)
+    if row.activated_at:
+        db.commit()
+        return {'activated': True}
+    if row.window_started <= now - timedelta(minutes=10):
+        row.attempts, row.window_started = 0, now
+    if row.attempts >= 5:
+        raise HTTPException(429, 'Повторите через 10 минут')
+    row.attempts += 1
+    correct = hmac.compare_digest(request.word.encode(), word.encode())
+    if correct:
+        row.activated_at = now
+    db.commit()  # Wrong attempts must survive a restart as well.
+    return {'activated': correct}
+
+
+@router.get('/users', dependencies=[Depends(authorize)])
+def active_users(after: int = 0, db: Session = Depends(get_db)):
+    ids = list(db.scalars(select(TelegramUser.telegram_id).join(TelegramActivation).where(
+        TelegramUser.enabled.is_(True), TelegramActivation.activated_at.is_not(None),
+        TelegramUser.telegram_id > after).order_by(TelegramUser.telegram_id).limit(100)))
+    return {'users': ids, 'next': ids[-1] if len(ids) == 100 else None}
 
 
 def owned(code, owner, db):
@@ -263,3 +316,48 @@ def runtime(request: Runtime, db: Session = Depends(get_db)):
         state.offset = max(state.offset, request.offset)
     db.commit()
     return {'offset': state.offset}
+
+
+class DeliveryResult(BaseModel):
+    claim: str = Field(pattern=r'^[a-f0-9]{32}$')
+    state: str = Field(pattern=r'^(sent|fallback|uncertain)$')
+    message_id: int | None = Field(None, gt=0)
+
+
+@router.post('/jobs/{code}/files/{file_id}/delivery')
+def claim_delivery(code: str, file_id: int, owner=Depends(user), db: Session = Depends(get_db)):
+    job, record = ready_file(code, file_id, owner, db)
+    row = db.get(TelegramDelivery, (owner.telegram_id, file_id))
+    if row:
+        return {'send': False, 'state': row.state}
+    path = jobs.resolve_job_file(code, record.relative_path)
+    row = TelegramDelivery(telegram_id=owner.telegram_id, file_id=file_id,
+                           claim=secrets.token_hex(16), state='sending')
+    db.add(row)
+    db.commit()  # Persist BEFORE contacting Telegram; ambiguous attempts never replay.
+    return {'send': True, 'claim': row.claim, 'size_bytes': path.stat().st_size,
+            'local_uri': path.as_uri()}
+
+
+@router.put('/jobs/{code}/files/{file_id}/delivery')
+def finish_delivery(code: str, file_id: int, request: DeliveryResult,
+                    owner=Depends(user), db: Session = Depends(get_db)):
+    _, job = owned(code, owner, db)
+    record = db.get(File, file_id)
+    row = db.get(TelegramDelivery, (owner.telegram_id, file_id))
+    if record is None or record.job_id != job.id or row is None or row.claim != request.claim:
+        raise HTTPException(404, 'Отправка не найдена')
+    if row.state == 'sending':
+        row.state, row.message_id = request.state, request.message_id
+        row.updated_at = datetime.utcnow()
+    db.commit()
+    return {'ok': True}
+
+
+@router.delete('/runtime/{owner}', dependencies=[Depends(authorize)])
+def release_runtime(owner: str, db: Session = Depends(get_db)):
+    state = db.scalar(select(TelegramRuntime).where(TelegramRuntime.id == 1).with_for_update())
+    if state and state.owner == owner:
+        state.lease_until = datetime.utcnow()
+        db.commit()
+    return {'ok': True}
