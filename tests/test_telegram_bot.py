@@ -280,3 +280,18 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(TelegramRetryAfter):
                 await app.send(UID, operation)
         self.assertEqual(operation.await_count, 3)
+
+
+    async def test_local_endpoint_is_private_and_flag_controls_limit(self):
+        from telegram_bot.bot import make_bot
+        with patch.dict(os.environ, TELEGRAM_LOCAL_API_ENABLED='true', TELEGRAM_LOCAL_API_URL='http://telegram-api:8081', TELEGRAM_BOT_TOKEN='123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ123456789'):
+            app = App(self.api, self.bot)
+            self.assertEqual(app.limit, 2000000000)
+            bot = make_bot()
+            try:
+                self.assertIn('http://telegram-api:8081/', bot.session.api.api_url(bot.token, 'getMe'))
+            finally:
+                await bot.session.close()
+        with patch.dict(os.environ, TELEGRAM_LOCAL_API_ENABLED='true', TELEGRAM_LOCAL_API_URL='https://external.invalid'):
+            with self.assertRaises(ValueError):
+                make_bot()

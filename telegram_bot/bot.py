@@ -388,7 +388,7 @@ async def main():
                 BotCommand(command='status', description='Последнее задание'),
                 BotCommand(command='myjobs', description='Последние задания'),
                 BotCommand(command='help', description='Справка, лимиты и сроки хранения'),
-            ])
+            ], request_timeout=20)
         lease_task = asyncio.create_task(renew_lease())
         notification_task = asyncio.create_task(app.notifications())
         while True:
@@ -396,7 +396,7 @@ async def main():
                 # Lease is renewed before long poll; duplicate instances fail closed.
                 await api.call('POST', '/runtime', json={'owner': owner, 'offset': offset})
                 updates = await bot.get_updates(offset=offset, timeout=25,
-                                               allowed_updates=['message', 'callback_query'])
+                                               allowed_updates=['message', 'callback_query'], request_timeout=35)
                 for update in updates:
                     try:
                         await dispatcher.feed_update(bot, update)
@@ -436,7 +436,7 @@ if __name__ == '__main__':
     logging.getLogger('httpx').setLevel(logging.CRITICAL)
     try:
         asyncio.run(main())
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, asyncio.CancelledError):
         pass
     except Exception:
         logging.error('Бот остановлен. Проверьте конфигурацию и доступность сервисов.')
