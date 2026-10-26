@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import subprocess
 import time
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -30,9 +31,9 @@ def write_settings(changes):
         else:
             result.append(line)
     result.extend(key + '=' + value for key, value in changes.items() if key not in keys)
-    temp = ROOT / '.env.telegram-switch'
-    with temp.open('w', opener=lambda p, flags: os.open(p, flags, 0o600)) as output:
+    with tempfile.NamedTemporaryFile('w', dir=ROOT, prefix='.env.telegram-switch.', delete=False) as output:
         output.write('\n'.join(result) + '\n')
+        temp = Path(output.name)
     temp.replace(path)
 
 

@@ -58,3 +58,25 @@ class DeploymentTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TelegramSwitchTests(unittest.TestCase):
+    def test_switch_preserves_secrets_and_uses_private_atomic_file(self):
+        import importlib.util
+        from unittest.mock import patch
+        spec = importlib.util.spec_from_file_location('telegram_switch', SOURCE / 'scripts/telegram_local.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            path = root / '.env'
+            path.write_text('TELEGRAM_BOT_TOKEN=keep-this\nTELEGRAM_LOCAL_API_ENABLED=false\n# retained comment\n')
+            with patch.object(module, 'ROOT', root):
+                module.write_settings({'TELEGRAM_LOCAL_API_ENABLED': 'true', 'COMPOSE_PROFILES': 'telegram,telegram-local'})
+                values = module.settings()
+            self.assertEqual(values['TELEGRAM_BOT_TOKEN'], 'keep-this')
+            self.assertEqual(values['TELEGRAM_LOCAL_API_ENABLED'], 'true')
+            self.assertEqual(values['COMPOSE_PROFILES'], 'telegram,telegram-local')
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertIn('# retained comment', path.read_text())
+            self.assertEqual(list(root.glob('.env.telegram-switch.*')), [])
