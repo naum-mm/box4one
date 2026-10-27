@@ -26,7 +26,7 @@ TERMINAL = {'completed', 'failed', 'expired'}
 
 WELCOME = 'Добро пожаловать в BOX4ONE! Введите кодовое слово для активации. Его можно получить у владельца сервиса.'
 MENU = ReplyKeyboardMarkup(keyboard=[
-    [KeyboardButton(text='🎬 Скачать видео'), KeyboardButton(text='🎵 Скачать аудио')],
+    [KeyboardButton(text='🍿 СКАЧАТЬ')],
     [KeyboardButton(text='📋 Мои задания'), KeyboardButton(text='ℹ️ Информация')]], resize_keyboard=True)
 
 
@@ -48,25 +48,25 @@ def make_bot():
 
 def help_text(upload_limit):
     history = max(1, min(100, int(os.getenv('TELEGRAM_HISTORY_LIMIT', '10'))))
-    size = float(os.getenv('MAX_JOB_GB', '2'))
-    ttl = int(os.getenv('JOB_TTL_MINUTES', '30'))
-    link_minutes = int(os.getenv('TELEGRAM_LINK_TTL_SECONDS', '600')) / 60
+    size = float(os.getenv('MAX_JOB_GB', '8'))
+    ttl = int(os.getenv('JOB_TTL_MINUTES', '60'))
     video = int(os.getenv('VIDEO_PLAYLIST_LIMIT', '50'))
     audio = int(os.getenv('AUDIO_PLAYLIST_LIMIT', '100'))
-    active = int(os.getenv('TELEGRAM_MAX_ACTIVE_JOBS', '2'))
+    active = int(os.getenv('MAX_ACTIVE_JOBS_PER_USER', os.getenv('TELEGRAM_MAX_ACTIVE_JOBS', '1')))
     return (
-        'Отправьте одну HTTP/HTTPS-ссылку на видео или плейлист и выберите формат.\n\n'
-        f'Лимит задания: {size:g} ГиБ, включая временные файлы обработки.\n'
-        f'Плейлист: до {video} видео или {audio} аудиофайлов.\n'
-        f'Активных заданий на пользователя: до {active}. Остальные отправляйте после завершения.\n'
-        f'Файлы хранятся {ttl} мин после завершения задания.\n'
-        f'Ссылка действует до {link_minutes:g} мин, но не дольше срока хранения.\n'
-        f'Напрямую в Telegram: до {upload_limit / 1000000:g} МБ на файл; '
+        'Отправьте одну ссылку на видео или плейлист и выберите формат.\n\n'
+        f'- Лимит задания: {size:g}ГБ, включая временные файлы обработки.\n'
+        f'- Плейлист: до {video} видео или {audio} аудиофайлов.\n'
+        f'- Активных заданий на пользователя: до {active}. Следующее задание отправляйте после завершения текущего.\n'
+        f'- Файлы хранятся {ttl} мин после завершения задания.\n'
+        '- Ссылка действует не дольше срока хранения.\n'
+        f'- Напрямую в Telegram: до {upload_limit / 1000000:g} МБ на файл; '
         'более крупные файлы и ZIP доступны по ссылке.\n\n'
         'Очередь обработки общая с сайтом.\n'
         '/status — последнее ваше задание\n'
         f'/myjobs — последние {history} ваших заданий\n'
         '/help — эта справка')
+
 
 
 class APIError(Exception):
@@ -194,8 +194,8 @@ class App:
             command = value.split('@', 1)[0].split(' ', 1)[0]
             if command in {'/start', '/help'} or value == 'ℹ️ Информация':
                 await self.say(uid, ('Добро пожаловать в BOX4ONE!\n' if command == '/start' else '') + self.help, reply_markup=MENU)
-            elif value in {'🎬 Скачать видео', '🎵 Скачать аудио'}:
-                await self.say(uid, 'Отправьте ссылку на видео или плейлист. Затем выберите 1080p / 720p / 480p или MP3 320 / MP3 128.')
+            elif value in {'🍿 СКАЧАТЬ', '🎬 Скачать видео', '🎵 Скачать аудио'}:
+                await self.say(uid, 'Отправьте ссылку на видео или плейлист, затем выберите формат.', reply_markup=MENU)
             elif command in {'/status', '/myjobs'} or value == '📋 Мои задания':
                 entries = result['jobs'][:1] if command == '/status' else result['jobs']
                 if not entries:

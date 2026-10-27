@@ -53,7 +53,8 @@ BOX4ONE использует консервативный предел **2 000 0
 Добавьте в существующий `.env`, не меняя остальные секреты:
 
 ```dotenv
-TELEGRAM_ACTIVATION_WORD=REDACTED_ACTIVATION_WORD
+# Значение создаётся установщиком и хранится только в закрытом .env.
+TELEGRAM_ACTIVATION_WORD=
 TELEGRAM_API_ID=
 TELEGRAM_API_HASH=
 TELEGRAM_LOCAL_API_URL=http://telegram-api:8081

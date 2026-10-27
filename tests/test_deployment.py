@@ -45,7 +45,7 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(self.configure('init', '--domain', 'video.example.com').returncode, 0)
         path = self.root / '.env'
         original = path.read_text()
-        for key in ('TELEGRAM_HISTORY_LIMIT=10', 'MAX_JOB_GB=2', 'TELEGRAM_PUBLIC_URL=',
+        for key in ('TELEGRAM_HISTORY_LIMIT=10', 'MAX_JOB_GB=8', 'TELEGRAM_PUBLIC_URL=',
                     'TELEGRAM_UPLOAD_LIMIT_BYTES=49000000', 'COMPOSE_PROFILES='):
             self.assertIn(key, original)
         self.assertEqual(self.configure('check').returncode, 0)
@@ -115,3 +115,19 @@ class TelegramSwitchTests(unittest.TestCase):
                     subprocess.CompletedProcess([],0,stdout='backend\ntelegram-bot\n')) as call:
                 with self.assertRaises(RuntimeError): module.reset_runtime_cursor('local','cloud')
                 self.assertEqual(call.call_count,1)
+
+    def test_installer_generates_private_activation_word(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root/'scripts').mkdir()
+            shutil.copy(SOURCE/'scripts/configure.py', root/'scripts/configure.py')
+            shutil.copytree(SOURCE/'nginx', root/'nginx')
+            result = subprocess.run(['python3', str(root/'scripts/configure.py'), 'init', '--domain', 'video.example.com'], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            values = dict(line.split('=',1) for line in (root/'.env').read_text().splitlines() if '=' in line)
+            word = values['TELEGRAM_ACTIVATION_WORD']
+            self.assertGreaterEqual(len(word), 32)
+            self.assertNotIn(word, result.stdout)
+            self.assertEqual(values['MAX_JOB_GB'], '8')
+            self.assertEqual(values['JOB_TTL_MINUTES'], '60')
+            self.assertEqual(values['MAX_ACTIVE_JOBS_PER_USER'], '1')

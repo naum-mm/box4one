@@ -55,3 +55,5 @@ def health():
 
 app.include_router(telegram.router)
 app.include_router(telegram.download_router)
+
+app.include_router(jobs.limits_router)

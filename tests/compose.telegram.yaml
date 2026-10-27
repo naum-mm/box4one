@@ -32,6 +32,8 @@ services:
       QUEUE_ACCESS_WORD: queue-test-only
       TELEGRAM_INTERNAL_TOKEN: telegram-test-token-with-at-least-32-characters
       TELEGRAM_ALLOWED_USERS: '10000000001,10000000002'
+      TELEGRAM_ACTIVATION_WORD: test-activation-code
+      MAX_ACTIVE_JOBS_PER_USER: 2
       TELEGRAM_PUBLIC_URL: https://test.example.com
       JOBS_ROOT: /tmp/test-jobs
     depends_on:

@@ -14,15 +14,19 @@ from fastapi import (
     Depends,
     HTTPException,
     Response,
+    Request,
     status,
 )
 
 from fastapi.responses import StreamingResponse
 
-from sqlalchemy import select
+from sqlalchemy import select, func
+from sqlalchemy.dialects.mysql import insert
 from sqlalchemy.orm import Session
 
-from app.security import verify_download_access
+from app.security import verify_download_access, ensure_web_client
+from app.limits import public_limits, max_active_jobs
+from app.web_models import WebClient, WebRequest
 from app.database import get_db
 from app.models import File, Job
 from app.schemas import (
@@ -525,12 +529,23 @@ def enqueue_job(db: Session, request: JobCreate) -> Job:
 )
 def create_job(
     request: JobCreate,
+    http_request: Request,
+    response: Response,
     db: Session = Depends(
         get_db
     ),
 ):
 
+    client = ensure_web_client(http_request, response)
+    upsert = insert(WebClient).values(id=client)
+    db.execute(upsert.on_duplicate_key_update(id=upsert.inserted.id))
+    db.scalar(select(WebClient).where(WebClient.id == client).with_for_update())
+    active = db.scalar(select(func.count()).select_from(WebRequest).join(Job).where(
+        WebRequest.client_id == client, Job.status.in_(('queued', 'downloading', 'processing'))))
+    if active >= max_active_jobs():
+        raise HTTPException(429, 'Достигнут лимит активных заданий. Дождитесь завершения текущего.')
     job = enqueue_job(db, request)
+    db.add(WebRequest(job_id=job.id, client_id=client))
 
     db.commit()
 
@@ -912,3 +927,13 @@ def download_file(
                 "nosniff",
         },
     )
+
+
+limits_router = APIRouter(prefix='/api')
+
+
+@limits_router.get('/limits')
+def limits(request: Request, response: Response):
+    ensure_web_client(request, response)
+    response.headers['Cache-Control'] = 'no-store'
+    return public_limits()

@@ -21,7 +21,7 @@ cleanup/config.env, telegram-bot.env, telegram-integration.env или Compose ov
 | `TELEGRAM_BOT_TOKEN` | Токен от BotFather |
 | `TELEGRAM_INTERNAL_TOKEN` | Отдельный случайный секрет, не менее 32 символов |
 | `TELEGRAM_ALLOWED_USERS` | Старые ID; больше не обязательный allowlist |
-| `TELEGRAM_ACTIVATION_WORD` | `REDACTED_ACTIVATION_WORD`, активация доступа (не показывается в приветствии) |
+| `TELEGRAM_ACTIVATION_WORD` | Приватное кодовое слово из `.env`, активация доступа (не показывается в приветствии) |
 | `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` | Собственные credentials приложения Telegram для Local API |
 | `TELEGRAM_LOCAL_API_ENABLED` | `false`; включается после процедуры logOut |
 | `TELEGRAM_LOCAL_API_URL` | `http://telegram-api:8081`, внутренняя сеть |
@@ -29,17 +29,17 @@ cleanup/config.env, telegram-bot.env, telegram-integration.env или Compose ov
 | `TELEGRAM_API_MEMORY` / `TELEGRAM_API_SWAP` | `256m` / `512m`, лимиты Local API |
 | `TELEGRAM_API_URL` | `http://backend:8000`, внутренний адрес backend |
 | `TELEGRAM_PUBLIC_URL` | Пусто — `https://DOMAIN`; HTTPS-адрес выдачи файлов |
-| `TELEGRAM_MAX_ACTIVE_JOBS` | `2`, активных заданий на пользователя |
+| `MAX_ACTIVE_JOBS_PER_USER` | `1`, общий лимит активных заданий для бота и веба |
 | `TELEGRAM_HISTORY_LIMIT` | `10`, последних заданий в `/myjobs`, диапазон 1–100 |
 | `TELEGRAM_POLL_SECONDS` | `10`, интервал обновления уведомлений |
 | `TELEGRAM_UPLOAD_LIMIT_BYTES` | `49000000`, прямой upload; максимум 49 МБ |
-| `TELEGRAM_LINK_TTL_SECONDS` | `600`, срок подписанной ссылки |
+| `TELEGRAM_LINK_TTL_SECONDS` | `3600`, срок подписанной ссылки |
 | `TELEGRAM_DRAFT_TTL_MINUTES` | `60`, срок выбора формата после ссылки |
 | `TELEGRAM_MAX_DRAFTS_PER_HOUR` | `60`, ограничение количества новых ссылок |
 | `TELEGRAM_CHAT_INTERVAL_SECONDS` | `1.1`, минимальная пауза между отправками в чат |
 | `TELEGRAM_SEND_INTERVAL_SECONDS` | `0.06`, минимальная глобальная пауза отправки |
-| `JOB_TTL_MINUTES` | `30`, срок хранения после завершения задания |
-| `MAX_JOB_GB` | `2` ГиБ на задание, включая временные файлы |
+| `JOB_TTL_MINUTES` | `60`, срок хранения после завершения задания |
+| `MAX_JOB_GB` | `8` ГиБ на задание, включая временные файлы |
 | `MIN_FREE_GB` | `2` ГиБ свободного места, резерв диска |
 | `VIDEO_PLAYLIST_LIMIT` / `AUDIO_PLAYLIST_LIMIT` | `50` / `100` элементов |
 | `ARCHIVE_MAX_CONCURRENT` | `1`, одновременно создаваемых ZIP |
